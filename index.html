@@ -12,7 +12,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     
-    <!-- Konfiguracja wyglądu (Tailwind) -->
+    <!-- Konfiguracja Tailwind -->
     <script>
         tailwind.config = {
             theme: {
@@ -33,9 +33,64 @@
         .drawer-closed { transform: translateX(100%); }
         .modal-fullscreen { width: 95vw; max-width: 1400px; height: 90vh; }
         #loginScreen { backdrop-filter: blur(10px); }
+
+        /* Styl dedykowanego wydruku planu dnia - ukrywa CRM, pokazuje tylko czystą kartę */
+        @media print {
+            body * { visibility: hidden !important; }
+            #todayPrintSheet, #todayPrintSheet * { visibility: visible !important; }
+            #todayPrintSheet { position: absolute; left: 0; top: 0; width: 100%; display: block !important; padding: 20px; }
+            .no-print { display: none !important; }
+        }
     </style>
 </head>
 <body class="bg-luxBg text-textDark min-h-screen flex flex-col relative">
+
+    <!-- DEDYKOWANY ARKUSZ DO DRUKU "PLAN NA DZIŚ" (Widoczny wyłącznie podczas drukowania) -->
+    <div id="todayPrintSheet" class="hidden text-black bg-white">
+        <div class="border-b-2 border-black pb-3 mb-4 flex justify-between items-end">
+            <div>
+                <h1 class="text-2xl font-black tracking-wide uppercase">PLAN OPERACYJNY DNIA</h1>
+                <p class="text-xs text-gray-600">Agent Ubezpieczeniowy | Superpolisa</p>
+            </div>
+            <div class="text-right">
+                <p id="print_todayDate" class="text-sm font-bold"></p>
+                <p class="text-xs text-gray-500">Wygenerowano z systemu CRM</p>
+            </div>
+        </div>
+
+        <div class="space-y-5 text-xs">
+            <div class="border border-gray-300 rounded p-3">
+                <h2 class="font-bold uppercase tracking-wider border-b border-gray-300 pb-1 mb-2 text-red-700">1. Pilne: Zadania po-polisowe i inspekcje (Zdjęcia AC / Wypowiedzenia OC)</h2>
+                <div id="print_tasksList" class="space-y-1"></div>
+            </div>
+
+            <div class="border border-gray-300 rounded p-3">
+                <h2 class="font-bold uppercase tracking-wider border-b border-gray-300 pb-1 mb-2 text-amber-700">2. Raty do przypomnienia (Zaległe i najbliższe 7 dni)</h2>
+                <div id="print_installmentsList" class="space-y-1"></div>
+            </div>
+
+            <div class="border border-gray-300 rounded p-3">
+                <h2 class="font-bold uppercase tracking-wider border-b border-gray-300 pb-1 mb-2 text-indigo-700">3. Wznowienia do kontaktu (Polisy kończące się w ciągu 30 dni)</h2>
+                <div id="print_renewalsList" class="space-y-1"></div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+                <div class="border border-gray-300 rounded p-3">
+                    <h2 class="font-bold uppercase tracking-wider border-b border-gray-300 pb-1 mb-2 text-blue-700">4. Przeglądy rejestracyjne</h2>
+                    <div id="print_inspectionsList" class="space-y-1"></div>
+                </div>
+                <div class="border border-gray-300 rounded p-3">
+                    <h2 class="font-bold uppercase tracking-wider border-b border-gray-300 pb-1 mb-2 text-emerald-700">5. Urodziny klientów</h2>
+                    <div id="print_birthdaysList" class="space-y-1"></div>
+                </div>
+            </div>
+
+            <div class="border border-gray-300 rounded p-3">
+                <h2 class="font-bold uppercase tracking-wider border-b border-gray-300 pb-1 mb-2 text-gray-800">6. Notatki i zadania bieżące</h2>
+                <div id="print_notesTasks" class="whitespace-pre-line text-gray-700"></div>
+            </div>
+        </div>
+    </div>
 
     <!-- 1. EKRAN LOGOWANIA -->
     <div id="loginScreen" class="fixed inset-0 bg-luxBg/95 z-[100] flex items-center justify-center transition-opacity">
@@ -59,7 +114,7 @@
         </div>
     </div>
 
-    <!-- 2. GŁÓWNY NAGŁÓWEK (Ukryty przed zalogowaniem) -->
+    <!-- 2. GŁÓWNY NAGŁÓWEK -->
     <header class="border-b border-luxBorder bg-luxCard/90 backdrop-blur-md sticky top-0 z-40 hidden" id="mainHeader">
         <div class="max-w-7xl mx-auto px-4 py-3.5 flex flex-col lg:flex-row justify-between items-center gap-4">
             <div class="flex items-center gap-3">
@@ -89,7 +144,7 @@
         </div>
     </header>
 
-    <!-- 3. GŁÓWNA ZAWARTOŚĆ APLIKACJI -->
+    <!-- 3. GŁÓWNA ZAWARTOŚĆ -->
     <main class="max-w-7xl mx-auto px-4 py-8 flex-grow w-full hidden" id="mainAppContent">
         
         <!-- ZAKŁADKA: PULPIT -->
@@ -99,7 +154,7 @@
                 <div class="lux-card p-5 rounded-2xl border-l-4 border-indigo-500"><span class="text-[10px] font-bold text-textMuted uppercase block">Przypis (Ten Mc)</span><p id="dash_monthPrem" class="text-2xl font-extrabold text-indigo-600 mt-1">0,00 PLN</p></div>
                 <div class="lux-card p-5 rounded-2xl border-l-4 border-green-500"><span class="text-[10px] font-bold text-textMuted uppercase block">Prowizja (Ten Mc)</span><p id="dash_monthComm" class="text-2xl font-extrabold text-green-600 mt-1">0,00 PLN</p></div>
                 <div class="lux-card p-5 rounded-2xl bg-amber-50 border border-amber-200">
-                    <div class="flex justify-between items-center mb-1"><span class="text-[10px] font-bold text-amber-800 uppercase">Cel Miesięczny</span><button onclick="editMonthlyGoal()" class="text-[10px] text-amber-900 underline">Edytuj</button></div>
+                    <div class="flex justify-between items-center mb-1"><span class="text-[10px] font-bold text-amber-800 uppercase">Cel Miesięczny</span><button onclick="editMonthlyGoal()" class="text-[10px] text-amber-900 underline font-bold">Edytuj</button></div>
                     <p id="dash_goalText" class="text-sm font-bold text-amber-900">0 / 10 000 PLN</p>
                     <div class="w-full bg-amber-200 rounded-full h-2 mt-2"><div id="dash_goalBar" class="bg-amber-600 h-2 rounded-full" style="width: 0%"></div></div>
                 </div>
@@ -115,7 +170,7 @@
                 </div>
                 <div class="flex gap-2">
                     <button onclick="openOfferModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-4 py-2 rounded-xl text-xs shadow-sm">📋 Nowa Oferta</button>
-                    <button onclick="window.print()" class="bg-gray-800 hover:bg-gray-900 text-white font-semibold px-4 py-2 rounded-xl text-xs shadow-sm">🖨️ Plan na dziś</button>
+                    <button onclick="printTodayPlan()" class="bg-gray-800 hover:bg-gray-900 text-white font-semibold px-4 py-2 rounded-xl text-xs shadow-sm">🖨️ Drukuj Plan Dnia</button>
                 </div>
             </div>
 
@@ -124,12 +179,29 @@
                     <h3 class="font-bold text-lg flex items-center gap-2">🔄 Kończy się w ciągu 30 dni</h3>
                     <div id="dash_thirtyDays" class="space-y-2"></div>
                 </div>
-                <div class="lux-card rounded-2xl p-6 bg-amber-50/50 border border-amber-200 flex flex-col justify-between">
-                    <div><h3 class="font-bold text-lg mb-3 text-amber-900">📌 Szybki Notatnik</h3><textarea id="quickNotesArea" oninput="saveQuickNotes()" rows="6" placeholder="Notatki (zapisują się same)..." class="w-full bg-white border border-amber-200 rounded-xl p-3 text-sm outline-none"></textarea></div>
+
+                <!-- NOTATNIK I LISTA ZADAŃ (TASKI) -->
+                <div class="lux-card rounded-2xl p-6 bg-amber-50/50 border border-amber-200 flex flex-col justify-between space-y-4">
+                    <div>
+                        <h3 class="font-bold text-lg mb-2 text-amber-900">📌 Szybki Notatnik</h3>
+                        <textarea id="quickNotesArea" oninput="saveQuickNotes()" rows="4" placeholder="Podręczne notatki (zapisują się w locie)..." class="w-full bg-white border border-amber-200 rounded-xl p-3 text-sm outline-none focus:border-amber-400"></textarea>
+                    </div>
+                    <div>
+                        <div class="flex justify-between items-center mb-2">
+                            <h4 class="font-bold text-sm text-amber-900 uppercase">Taski / Do załatwienia</h4>
+                            <span id="dash_tasksCount" class="text-xs text-amber-700 font-bold">0</span>
+                        </div>
+                        <div class="flex gap-2 mb-2">
+                            <input type="text" id="newTaskInput" onkeydown="if(event.key==='Enter') addTask();" placeholder="Dodaj taska i wciśnij Enter..." class="flex-grow bg-white border border-amber-200 rounded-lg px-2.5 py-1.5 text-xs outline-none focus:border-amber-500">
+                            <button onclick="addTask()" class="bg-amber-700 text-white font-bold px-3 py-1.5 rounded-lg text-xs hover:bg-amber-800">+</button>
+                        </div>
+                        <div id="tasksListContainer" class="space-y-1.5 max-h-44 overflow-y-auto pr-1"></div>
+                    </div>
                 </div>
+
                 <div class="lux-card rounded-2xl p-6 border-t-4 border-red-500"><h3 class="font-bold text-lg mb-4 flex items-center gap-2">⚠️ Zaległe raty i inspekcje</h3><div id="dash_overdue" class="space-y-3"></div></div>
                 <div class="lux-card rounded-2xl p-6 border-t-4 border-goldAccent"><h3 class="font-bold text-lg mb-4 flex items-center gap-2">💸 Raty (najbliższe 7 dni)</h3><div id="dash_upcoming" class="space-y-3"></div></div>
-                <div class="lux-card rounded-2xl p-6 border-t-4 border-blue-500"><h3 class="font-bold text-lg mb-4 flex items-center gap-2">🎂 Urodziny i Przeglądy</h3><div id="dash_birthdays" class="flex flex-wrap gap-2"></div></div>
+                <div class="lux-card rounded-2xl p-6 border-t-4 border-blue-500"><h3 class="font-bold text-lg mb-4 flex items-center gap-2">🎂 Urodziny i Przeglądy</h3><div id="dash_birthdays" class="space-y-2"></div></div>
             </div>
         </section>
 
@@ -163,7 +235,7 @@
 
         <!-- ZAKŁADKA: ODNOWIENIA -->
         <section id="tab-renewals" class="space-y-6 hidden">
-            <h2 class="text-2xl font-bold text-textDark">Lejek Odnowień (< 45 dni)</h2>
+            <h2 class="text-2xl font-bold text-textDark">Lejek Odnowień (&lt; 45 dni)</h2>
             <div class="grid grid-cols-1 md:grid-cols-4 gap-4" id="kanbanBoard">
                 <div class="bg-gray-100 rounded-xl p-4 flex flex-col h-full border border-gray-200"><h3 class="font-bold text-gray-700 mb-3 text-sm uppercase">☎️ Do obdzwonienia</h3><div id="k_todo" class="space-y-3 flex-grow"></div></div>
                 <div class="bg-blue-50 rounded-xl p-4 flex flex-col h-full border border-blue-200"><h3 class="font-bold text-blue-700 mb-3 text-sm uppercase">✉️ Oferta wysłana</h3><div id="k_offer" class="space-y-3 flex-grow"></div></div>
@@ -180,7 +252,7 @@
             </div>
             <div class="flex justify-between items-center mt-8">
                 <h2 class="text-2xl font-bold">Cash-flow Miesięczny</h2>
-                <div class="flex gap-2"><input type="month" id="financeMonthFilter" onchange="renderFinances()" class="border bg-white rounded-lg px-2 py-1 text-sm"><button onclick="clearFinanceFilter()" class="bg-gray-200 px-3 py-1 rounded-lg text-sm">Wszystkie</button></div>
+                <div class="flex gap-2"><input type="month" id="financeMonthFilter" onchange="renderFinances()" class="border bg-white rounded-lg px-2 py-1 text-sm"><button onclick="clearFinanceFilter()" class="bg-gray-200 px-3 py-1 rounded-lg text-sm font-semibold">Wszystkie</button></div>
             </div>
             <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4">
                 <div class="bg-green-50 p-4 rounded-xl border border-green-200"><span class="text-[10px] uppercase font-bold text-green-800">Prowizje Rozliczone</span><p id="f_paidAmount" class="text-xl font-bold text-green-600 mt-1">0,00 PLN</p></div>
@@ -199,7 +271,7 @@
                 <h2 class="text-2xl font-bold">Kalendarz i Przypomnienia</h2>
                 <div class="flex gap-2 items-center bg-luxCard p-1.5 rounded-xl border border-luxBorder">
                     <button onclick="changeCalendarMonth(-1)" class="px-3 py-1 bg-luxBg rounded-lg text-sm hover:bg-gray-200 font-bold">◀</button>
-                    <span id="calendarMonthLabel" class="text-sm font-bold w-32 text-center text-textDark">Listopad 2026</span>
+                    <span id="calendarMonthLabel" class="text-sm font-bold w-36 text-center text-textDark">Listopad 2026</span>
                     <button onclick="changeCalendarMonth(1)" class="px-3 py-1 bg-luxBg rounded-lg text-sm hover:bg-gray-200 font-bold">▶</button>
                 </div>
             </div>
@@ -229,8 +301,8 @@
                 <div class="lux-card rounded-2xl p-6">
                     <h3 class="font-bold text-lg mb-2">Słownik Prowizji</h3>
                     <div class="space-y-2 mb-4 bg-luxBg p-3 rounded-xl border border-luxBorder">
-                        <div class="grid grid-cols-2 gap-2"><div><label class="text-[10px] uppercase">TU</label><select id="set_insurer" class="w-full border p-2 rounded-lg text-sm mt-1"></select></div><div><label class="text-[10px] uppercase">Ryzyko</label><input type="text" id="set_risk" class="w-full border p-2 rounded-lg text-sm mt-1 uppercase"></div></div>
-                        <div class="grid grid-cols-2 gap-2 items-end"><div><label class="text-[10px] uppercase">Prowizja (%)</label><input type="number" id="set_pct" class="w-full border p-2 rounded-lg text-sm mt-1"></div><button onclick="addCommissionRule()" class="w-full bg-goldAccent text-white py-2 rounded-lg font-bold">Zapisz</button></div>
+                        <div class="grid grid-cols-2 gap-2"><div><label class="text-[10px] uppercase">TU</label><select id="set_insurer" class="w-full border p-2 rounded-lg text-sm mt-1"></select></div><div><label class="text-[10px] uppercase">Ryzyko</label><input type="text" id="set_risk" class="w-full border p-2 rounded-lg text-sm mt-1 uppercase" placeholder="np. OC lub AC"></div></div>
+                        <div class="grid grid-cols-2 gap-2 items-end"><div><label class="text-[10px] uppercase">Prowizja (%)</label><input type="number" id="set_pct" class="w-full border p-2 rounded-lg text-sm mt-1" placeholder="10"></div><button onclick="addCommissionRule()" class="w-full bg-goldAccent text-white py-2 rounded-lg font-bold">Zapisz</button></div>
                     </div>
                     <div class="overflow-y-auto max-h-40 border border-luxBorder rounded-xl"><table class="w-full text-left border-collapse"><thead class="bg-luxBg text-[10px] uppercase sticky top-0"><tr><th class="p-2">TU</th><th class="p-2">Ryzyko</th><th class="p-2 text-right">Stawka</th><th class="p-2"></th></tr></thead><tbody id="commissionDictBody" class="divide-y divide-luxBorder text-sm"></tbody></table></div>
                 </div>
@@ -239,7 +311,7 @@
         </section>
     </main>
 
-    <!-- 4. MODALE POMOCNICZE (Otwierane w oknach) -->
+    <!-- 4. MODALE -->
     
     <!-- MODAL: KARTA KLIENTA PEŁNA -->
     <div id="clientFullModalOverlay" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-2 sm:p-4" onclick="if(event.target === this) closeClientFull()">
@@ -284,7 +356,10 @@
                         <div>
                             <div class="flex justify-between items-center border-b border-luxBorder pb-2"><h3 class="font-bold text-lg text-textDark">Garaż</h3><button onclick="toggleAddVehicle()" class="text-xs font-bold bg-blue-50 text-blue-700 px-2.5 py-1 rounded">+ Dodaj</button></div>
                             <div id="cfm_addVehicleBox" class="hidden bg-blue-50 border border-blue-200 p-3 rounded-xl mt-3 space-y-2 text-sm">
-                                <input type="text" id="v_brand" placeholder="Marka i Model" class="w-full border rounded p-1.5">
+                                <div class="grid grid-cols-2 gap-2">
+                                    <input list="popularBrandsList" id="v_brand" placeholder="Marka" class="w-full border rounded p-1.5 uppercase">
+                                    <input type="text" id="v_model" placeholder="Model" class="w-full border rounded p-1.5">
+                                </div>
                                 <div class="grid grid-cols-2 gap-2"><input type="number" id="v_year" placeholder="Rok" class="w-full border rounded p-1.5"><input type="text" id="v_plate" placeholder="Nr Rej." class="w-full border rounded p-1.5 uppercase"></div>
                                 <div class="grid grid-cols-2 gap-2 mt-1"><input type="text" id="v_vin" placeholder="VIN" maxlength="17" class="w-full border rounded p-1.5 uppercase"><input type="date" id="v_inspection" class="w-full border rounded p-1.5" title="Koniec przeglądu rejestracyjnego"></div>
                                 <div class="mt-2"><label class="text-xs font-bold"><input type="checkbox" id="v_anglik" class="mr-1"> 🇬🇧 Anglik / USA (Trudne ryzyko)</label></div>
@@ -363,69 +438,172 @@
         </div>
     </div>
 
-    <!-- MODAL: KREATOR POLISY -->
+    <!-- MODAL: KREATOR POLISY (Poprawiony Krok 1, Krok 3 z osobną marką, Krok 4 z dodawaniem ryzyk) -->
     <div id="policyModal" class="fixed inset-0 bg-black/40 backdrop-blur-sm hidden items-center justify-center z-50 p-4">
         <div class="lux-card rounded-2xl p-6 w-full max-w-xl bg-white shadow-xl relative max-h-[95vh] overflow-y-auto">
             <button onclick="closePolicyModal()" class="absolute top-4 right-4 text-textMuted font-bold text-xl">&times;</button>
             <h3 id="policyModalTitle" class="font-bold text-lg mb-1">Dodaj nową polisę</h3>
             <p id="policyStepIndicator" class="text-xs text-textMuted mb-5">Krok 1 z 4</p>
 
-            <!-- KROK 1 -->
+            <!-- KROK 1: Wybór Klienta (Bez zapamiętywania na stałe) -->
             <div id="pStep1" class="space-y-4">
-                <div><label class="text-xs font-semibold text-textMuted">PESEL / NIP Klienta</label><input type="text" id="p_peselInput" maxlength="11" oninput="handlePolicyPeselInput(this)" class="w-full border p-2 rounded-xl text-sm mt-1 outline-none"></div>
-                <div id="p_clientFoundBox" class="hidden p-3 bg-green-50 border border-green-200 rounded-xl flex items-center gap-3"><span class="text-green-600 font-bold text-xl">✓</span><div><p class="text-xs text-green-700 font-bold">Rozpoznano</p><p id="p_clientFoundName" class="text-sm font-semibold">-</p></div></div>
+                <div>
+                    <label class="text-xs font-semibold text-textMuted">Wpisz PESEL (11) lub NIP (10) klienta</label>
+                    <input type="text" id="p_peselInput" maxlength="11" oninput="handlePolicyPeselInput(this)" class="w-full border p-2.5 rounded-xl text-sm mt-1 outline-none font-mono focus:border-goldAccent" placeholder="Wpisz lub wklej PESEL/NIP...">
+                </div>
+                
+                <div id="p_clientFoundBox" class="hidden p-3.5 bg-green-50 border border-green-200 rounded-xl flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                        <span class="text-green-600 font-bold text-xl">✓</span>
+                        <div>
+                            <p class="text-xs text-green-700 font-bold uppercase">Wybrany Klient</p>
+                            <p id="p_clientFoundName" class="text-sm font-bold text-textDark">-</p>
+                        </div>
+                    </div>
+                    <button onclick="resetPolicyClientChoice()" class="text-xs text-red-600 font-bold hover:underline">Zmień</button>
+                </div>
+
+                <div id="p_clientNotFoundBox" class="hidden p-4 bg-amber-50 border border-amber-200 rounded-xl space-y-3">
+                    <p class="text-xs font-bold text-amber-800">Nie znaleziono w bazie. Wpisz imię i nazwisko, aby utworzyć klienta w locie:</p>
+                    <input type="text" id="p_quickName" placeholder="Imię i nazwisko / Firma" class="w-full border p-2 rounded-lg text-sm bg-white">
+                    <div class="grid grid-cols-2 gap-2">
+                        <input type="date" id="p_quickBirth" class="border p-2 rounded-lg text-sm bg-white" title="Data urodzenia">
+                        <input type="date" id="p_quickLicense" class="border p-2 rounded-lg text-sm bg-white" title="Data wydania prawa jazdy">
+                    </div>
+                    <button onclick="saveQuickClientFromPolicy()" class="w-full bg-amber-700 text-white font-bold py-2 rounded-lg text-xs hover:bg-amber-800">Zapisz i kontynuuj</button>
+                </div>
             </div>
 
-            <!-- KROK 2 -->
+            <!-- KROK 2: TU i Okres -->
             <div id="pStep2" class="space-y-4 hidden">
                 <div class="flex gap-4 p-3 bg-blue-50 border border-blue-200 rounded-xl mb-4">
-                    <label class="flex items-center text-sm font-bold"><input type="radio" name="p_salesType" value="new" checked class="mr-2"> Nowy Biznes</label>
-                    <label class="flex items-center text-sm font-bold"><input type="radio" name="p_salesType" value="renewal" class="mr-2"> Wznowienie</label>
+                    <label class="flex items-center text-sm font-bold cursor-pointer"><input type="radio" name="p_salesType" value="new" checked class="mr-2 accent-indigo-600"> Nowy Biznes</label>
+                    <label class="flex items-center text-sm font-bold cursor-pointer"><input type="radio" name="p_salesType" value="renewal" class="mr-2 accent-indigo-600"> Wznowienie</label>
                 </div>
                 <div class="grid grid-cols-2 gap-3">
-                    <div><label class="text-xs font-semibold text-textMuted">TU</label><select id="p_insurer" onchange="updateRiskDatalist()" class="w-full border p-2 rounded-xl text-sm mt-1"></select></div>
-                    <div><label class="text-xs font-semibold text-textMuted">Rodzaj</label><select id="p_type" class="w-full border p-2 rounded-xl text-sm mt-1"><option>Komunikacja</option><option>Majątek</option><option>Travel</option><option>Firmowe</option></select></div>
+                    <div><label class="text-xs font-semibold text-textMuted">TU</label><select id="p_insurer" onchange="updateRiskDatalist()" class="w-full border p-2 rounded-xl text-sm mt-1 bg-white"></select></div>
+                    <div>
+                        <label class="text-xs font-semibold text-textMuted">Rodzaj</label>
+                        <select id="p_type" onchange="handlePolicyTypeChange()" class="w-full border p-2 rounded-xl text-sm mt-1 bg-white">
+                            <option value="Komunikacja">Komunikacja</option>
+                            <option value="Majątek">Majątek</option>
+                            <option value="Travel">Travel</option>
+                            <option value="Firmowe">Firmowe</option>
+                        </select>
+                    </div>
                 </div>
-                <div><label class="text-xs font-semibold text-textMuted">Nr Polisy</label><input type="text" id="p_number" class="w-full border p-2 rounded-xl text-sm mt-1"></div>
-                <div class="grid grid-cols-2 gap-3"><div><label class="text-xs font-semibold text-textMuted">Początek</label><input type="date" id="p_dateStart" onchange="autoFillEndDate(this.value)" class="w-full border p-2 rounded-xl text-sm mt-1"></div><div><label class="text-xs font-semibold text-textMuted">Koniec</label><input type="date" id="p_dateEnd" class="w-full border p-2 rounded-xl text-sm mt-1"></div></div>
+                <div><label class="text-xs font-semibold text-textMuted">Nr Polisy</label><input type="text" id="p_number" class="w-full border p-2 rounded-xl text-sm mt-1 uppercase"></div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div><label class="text-xs font-semibold text-textMuted">Początek</label><input type="date" id="p_dateStart" onchange="autoFillEndDate(this.value)" class="w-full border p-2 rounded-xl text-sm mt-1"></div>
+                    <div><label class="text-xs font-semibold text-textMuted">Koniec</label><input type="date" id="p_dateEnd" class="w-full border p-2 rounded-xl text-sm mt-1"></div>
+                </div>
             </div>
 
-            <!-- KROK 3 -->
+            <!-- KROK 3: Przedmiot z osobną Marką i Model -->
             <div id="pStep3" class="space-y-4 hidden">
-                <div><label class="text-xs font-bold text-textDark block mb-1">Przedmiot Ubezpieczenia (opis, marka/model, adres)</label><input type="text" id="p_homeAddress" placeholder="Wpisz ręcznie" class="w-full border p-2 rounded-xl text-sm mt-1"></div>
-                
-                <div class="bg-red-50 p-3 border border-red-200 rounded-xl mt-4 space-y-2">
-                    <p class="text-xs font-bold text-red-800">Czy wymaga działań po-polisowych?</p>
-                    <label class="text-sm font-bold block"><input type="checkbox" id="p_reqAc" class="mr-2">Wymagane zdjęcia AC (inspekcja)</label>
-                    <label class="text-sm font-bold block"><input type="checkbox" id="p_reqOc" class="mr-2">Wymagane wypowiedzenie starego OC</label>
+                <!-- Sekcja Komunikacja -->
+                <div id="p_vehicleSection" class="space-y-3 bg-blue-50/50 p-4 rounded-xl border border-blue-200">
+                    <h4 class="text-xs font-bold text-blue-900 uppercase">Dane Pojazdu</h4>
+                    <div class="grid grid-cols-2 gap-2">
+                        <div>
+                            <label class="text-[10px] uppercase font-bold text-textMuted">Marka</label>
+                            <input list="popularBrandsList" id="p_carBrand" oninput="assembleSubjectString()" placeholder="Wybierz lub wpisz markę" class="w-full border p-2 rounded-lg text-sm bg-white uppercase">
+                        </div>
+                        <div>
+                            <label class="text-[10px] uppercase font-bold text-textMuted">Model</label>
+                            <input type="text" id="p_carModel" oninput="assembleSubjectString()" placeholder="np. Golf VII / Ceed" class="w-full border p-2 rounded-lg text-sm bg-white">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="text-[10px] uppercase font-bold text-textMuted">Nr Rejestracyjny</label>
+                        <input type="text" id="p_carPlate" oninput="assembleSubjectString()" placeholder="np. GKA12345" class="w-full border p-2 rounded-lg text-sm bg-white uppercase font-mono">
+                    </div>
+                </div>
+
+                <!-- Sekcja Ogólna / Majątek -->
+                <div id="p_generalSection" class="space-y-2 hidden">
+                    <label class="text-xs font-bold text-textDark block">Przedmiot Ubezpieczenia (adres lokalu / mienie)</label>
+                    <input type="text" id="p_homeAddress" oninput="assembleSubjectString()" placeholder="np. Dom jednorodzinny, Gdańsk ul. Długa 1" class="w-full border p-2 rounded-xl text-sm bg-white">
+                </div>
+
+                <div class="bg-red-50 p-3 border border-red-200 rounded-xl space-y-2">
+                    <p class="text-xs font-bold text-red-800">Działania po-polisowe do zrobienia:</p>
+                    <label class="text-sm font-bold block cursor-pointer"><input type="checkbox" id="p_reqAc" class="mr-2">📸 Wymagane zdjęcia AC (inspekcja)</label>
+                    <label class="text-sm font-bold block cursor-pointer"><input type="checkbox" id="p_reqOc" class="mr-2">✉️ Wymagane wypowiedzenie starego OC</label>
                 </div>
             </div>
 
-            <!-- KROK 4 -->
+            <!-- KROK 4: Ryzyka i Płatność (Odblokowane dodawanie ryzyk) -->
             <div id="pStep4" class="space-y-4 hidden">
                 <div class="bg-gray-50 border border-gray-200 rounded-xl p-4">
-                    <h4 class="font-bold text-sm text-textDark mb-3">🛡️ Ryzyka</h4>
+                    <h4 class="font-bold text-sm text-textDark mb-3">🛡️ Dodaj Ryzyka do Polisy</h4>
                     <div class="grid grid-cols-12 gap-2 items-end mb-3">
-                        <div class="col-span-5"><input list="riskDatalist" id="p_riskNameInput" oninput="checkRiskDictForAutoFill()" placeholder="Nazwa" class="w-full border rounded p-2 text-sm uppercase bg-white"><datalist id="riskDatalist"></datalist></div>
-                        <div class="col-span-3"><input type="number" id="p_riskPremInput" placeholder="Skł(PLN)" class="w-full border rounded p-2 text-sm bg-white"></div>
-                        <div class="col-span-2"><input type="number" id="p_riskPctInput" placeholder="%" class="w-full border rounded p-2 text-sm bg-yellow-50"></div>
-                        <div class="col-span-2"><button onclick="addRiskToTemp()" class="w-full bg-textDark text-white font-bold text-sm py-2 rounded">Dodaj</button></div>
+                        <div class="col-span-5">
+                            <label class="text-[10px] uppercase font-bold text-textMuted">Nazwa ryzyka</label>
+                            <input list="riskDatalist" id="p_riskNameInput" oninput="checkRiskDictForAutoFill()" placeholder="OC / AC / NNW..." class="w-full border rounded p-2 text-sm uppercase bg-white">
+                            <datalist id="riskDatalist"></datalist>
+                        </div>
+                        <div class="col-span-3">
+                            <label class="text-[10px] uppercase font-bold text-textMuted">Składka (PLN)</label>
+                            <input type="number" id="p_riskPremInput" placeholder="0.00" class="w-full border rounded p-2 text-sm bg-white">
+                        </div>
+                        <div class="col-span-2">
+                            <label class="text-[10px] uppercase font-bold text-textMuted">Prowizja %</label>
+                            <input type="number" id="p_riskPctInput" placeholder="%" class="w-full border rounded p-2 text-sm bg-yellow-50">
+                        </div>
+                        <div class="col-span-2">
+                            <button type="button" onclick="addRiskToTemp()" class="w-full bg-textDark text-white font-bold text-sm py-2 rounded hover:bg-black transition-colors">+ Dodaj</button>
+                        </div>
                     </div>
                     <div id="p_tempRisksList" class="space-y-2 mt-2 max-h-32 overflow-y-auto"></div>
                 </div>
-                <div class="grid grid-cols-2 gap-3 p-3 bg-luxBg rounded-xl border border-luxBorder"><div><label class="text-xs font-semibold text-textMuted">Składka Całk.</label><input type="number" id="p_premium" readonly class="w-full border bg-gray-100 p-2 rounded-xl text-sm font-bold"></div><div><label class="text-xs font-semibold text-textMuted">Prowizja Całk.</label><input type="text" id="p_commValue" readonly class="w-full border bg-green-50 p-2 rounded-xl text-sm font-bold text-green-700"></div></div>
-                <div class="grid grid-cols-2 gap-3"><div><label class="text-xs font-semibold text-textMuted">Liczba rat</label><select id="p_installments" onchange="calcInstallmentsOnly()" class="w-full border p-2 rounded-xl text-sm"><option value="1">1</option><option value="2">2</option><option value="4">4</option></select></div><div><label class="text-xs font-semibold text-textMuted">Termin I raty</label><input type="date" id="p_firstPaymentDate" onchange="calcInstallmentsOnly()" class="w-full border p-2 rounded-xl text-sm"></div></div>
-                <div id="p_installmentsContainer" class="hidden space-y-2 p-3 bg-amber-50 rounded-xl border border-amber-200"><p class="text-xs font-bold text-amber-800">Harmonogram rat</p><div id="p_installmentsList" class="space-y-2"></div></div>
+
+                <div class="grid grid-cols-2 gap-3 p-3 bg-luxBg rounded-xl border border-luxBorder">
+                    <div><label class="text-xs font-semibold text-textMuted">Składka Całkowita</label><input type="number" id="p_premium" readonly class="w-full border bg-gray-100 p-2 rounded-xl text-sm font-bold"></div>
+                    <div><label class="text-xs font-semibold text-textMuted">Prowizja Całkowita</label><input type="text" id="p_commValue" readonly class="w-full border bg-green-50 p-2 rounded-xl text-sm font-bold text-green-700"></div>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div><label class="text-xs font-semibold text-textMuted">Liczba rat</label><select id="p_installments" onchange="calcInstallmentsOnly()" class="w-full border p-2 rounded-xl text-sm bg-white"><option value="1">1</option><option value="2">2</option><option value="4">4</option></select></div>
+                    <div><label class="text-xs font-semibold text-textMuted">Termin I raty</label><input type="date" id="p_firstPaymentDate" onchange="calcInstallmentsOnly()" class="w-full border p-2 rounded-xl text-sm"></div>
+                </div>
+                <div id="p_installmentsContainer" class="hidden space-y-2 p-3 bg-amber-50 rounded-xl border border-amber-200">
+                    <p class="text-xs font-bold text-amber-800">Harmonogram rat</p>
+                    <div id="p_installmentsList" class="space-y-2"></div>
+                </div>
             </div>
 
             <div class="flex justify-between mt-6 pt-4 border-t border-luxBorder">
-                <button id="p_btnPrev" onclick="policyStep(-1)" class="px-4 py-2 border rounded-lg text-sm hidden">Wstecz</button>
+                <button id="p_btnPrev" onclick="policyStep(-1)" class="px-4 py-2 border rounded-lg text-sm hidden font-semibold">Wstecz</button>
                 <div class="flex-grow"></div>
-                <button id="p_btnNext" onclick="policyStep(1)" class="px-6 py-2 bg-textDark text-white rounded-lg text-sm font-bold disabled:opacity-50">Dalej</button>
-                <button id="p_btnSave" onclick="savePolicy()" class="px-6 py-2 bg-goldAccent text-white rounded-lg text-sm font-bold hidden">Zapisz polisę</button>
+                <button id="p_btnNext" onclick="policyStep(1)" class="px-6 py-2 bg-textDark text-white rounded-lg text-sm font-bold disabled:opacity-40" disabled>Dalej</button>
+                <button id="p_btnSave" onclick="savePolicy()" class="px-6 py-2 bg-goldAccent text-white rounded-lg text-sm font-bold hidden hover:bg-goldHover">Zapisz polisę</button>
             </div>
         </div>
     </div>
+
+    <!-- DATALIST MARKI POJAZDÓW (Najpopularniejsze na polskim rynku) -->
+    <datalist id="popularBrandsList">
+        <option value="Audi">
+        <option value="BMW">
+        <option value="Citroen">
+        <option value="Dacia">
+        <option value="Fiat">
+        <option value="Ford">
+        <option value="Honda">
+        <option value="Hyundai">
+        <option value="Kia">
+        <option value="Mazda">
+        <option value="Mercedes-Benz">
+        <option value="Nissan">
+        <option value="Opel">
+        <option value="Peugeot">
+        <option value="Renault">
+        <option value="Seat">
+        <option value="Skoda">
+        <option value="Toyota">
+        <option value="Volkswagen">
+        <option value="Volvo">
+    </datalist>
 
     <!-- MODAL: KREATOR OFERT -->
     <div id="offerModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4 transition-opacity" onclick="if(event.target === this) closeOfferModal()">
@@ -457,7 +635,7 @@
                         <div class="col-span-6 sm:col-span-2"><input type="text" id="off_rata" placeholder="I Rata" class="w-full border p-2 rounded-lg text-sm bg-white"></div>
                         <div class="col-span-6 sm:col-span-2"><input type="number" id="off_prem" placeholder="Składka(PLN)" class="w-full border p-2 rounded-lg text-sm font-bold bg-white"></div>
                         <div class="col-span-12 mt-2 flex gap-2">
-                            <label class="text-xs font-bold flex items-center"><input type="checkbox" id="off_isRecommended" class="mr-1"> ⭐ Wariant rekomendowany</label>
+                            <label class="text-xs font-bold flex items-center cursor-pointer"><input type="checkbox" id="off_isRecommended" class="mr-1"> ⭐ Wariant rekomendowany</label>
                             <button onclick="addOfferRow()" class="flex-grow bg-indigo-600 text-white font-bold text-sm py-2 rounded-lg hover:bg-indigo-700">+ Dodaj wariant</button>
                         </div>
                     </div>
@@ -474,7 +652,7 @@
 
                 <div id="offerRecommendationArea" class="mt-4">
                     <label class="text-xs font-bold block mb-1">Rekomendacja / Wiadomość dla klienta (Wklej tu odpowiedź od AI):</label>
-                    <textarea id="off_recommendationText" rows="3" class="w-full border border-luxBorder rounded-xl p-3 text-sm outline-none focus:border-goldAccent" placeholder="Panie Janie, przesyłam zestawienie. Zdecydowanie rekomenduję wariant..."></textarea>
+                    <textarea id="off_recommendationText" rows="3" class="w-full border border-luxBorder rounded-xl p-3 text-sm outline-none focus:border-goldAccent" placeholder="Panie Janie, przesyłam zestawienie..."></textarea>
                 </div>
             </div>
             
@@ -485,7 +663,7 @@
         </div>
     </div>
 
-    <!-- SZYBKI KLIENT (Z pulpitu) -->
+    <!-- SZYBKI KLIENT -->
     <div id="clientModal" class="fixed inset-0 bg-black/40 backdrop-blur-sm hidden items-center justify-center z-50 p-4">
         <div class="lux-card rounded-2xl p-6 w-full max-w-md bg-white shadow-xl relative">
             <button onclick="closeClientModal()" class="absolute top-4 right-4 text-textMuted font-bold text-xl">&times;</button>
@@ -496,7 +674,7 @@
         </div>
     </div>
 
-    <!-- PODPIĘCIE LOGIKI Z ZEWNĘTRZNYCH PLIKÓW JS -->
+    <!-- SKRYPTY ZEWNĘTRZNE -->
     <script src="firebase-config.js"></script>
     <script src="ui.js"></script>
     <script src="app.js"></script>
