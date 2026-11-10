@@ -28,14 +28,16 @@ let customBrandsList = [
 let currentOpenId = null;
 let currentOpenPolicyId = null;
 let editingPolicyId = null;
+let editingVehicleId = null;
 let tempPolicyRisks = [];
+let isManualCommission = false;
 let selectedClientIdForPolicy = null;
 let editingOfferId = null;
 let tempOfferRows = [];
 let currentPolicyStep = 1;
 let currentCalendarDate = new Date();
+let selectedCalendarDay = null;
 
-// Inicjalizacja filtra miesiąca po załadowaniu DOM
 document.addEventListener('DOMContentLoaded', () => {
     let today = new Date();
     let fMonthFilter = document.getElementById('financeMonthFilter');
@@ -85,6 +87,7 @@ function syncAndRender(uploadToCloud = true) {
     renderCommissionDict();
     renderOffersList();
     renderInsurersLibrary();
+    renderBrandsDatalist();
     renderCalendar();
     renderTasks();
     
@@ -107,7 +110,20 @@ function syncAndRender(uploadToCloud = true) {
     }
 }
 
-// ================= 3. FUNKCJE POMOCNICZE I WYSZUKIWARKA =================
+// ================= 3. FUNKCJE POMOCNICZE I KOPIOWANIE =================
+function copyToClipboard(text, label = "Dane") {
+    let clean = String(text || "").trim();
+    if(!clean || clean === "-" || clean === "PESEL / NIP: -") return;
+    navigator.clipboard.writeText(clean).then(() => {
+        let toast = document.getElementById('copyToast');
+        if(toast) {
+            toast.innerText = `📋 Skopiowano (${label}): ${clean}`;
+            toast.classList.remove('hidden');
+            setTimeout(() => toast.classList.add('hidden'), 2200);
+        }
+    }).catch(err => console.error("Błąd kopiowania", err));
+}
+
 function formatPLN(num) { 
     if (isNaN(num) || num === null || num === "") return "0,00 PLN"; 
     return new Intl.NumberFormat('pl-PL', { style: 'currency', currency: 'PLN' }).format(Number(num)); 
@@ -116,26 +132,38 @@ function formatPLN(num) {
 function calculateYears(dateString) { 
     if (!dateString) return null; 
     const targetDate = new Date(dateString); 
+    if (isNaN(targetDate.getTime())) return null;
     const today = new Date(); 
     let years = today.getFullYear() - targetDate.getFullYear(); 
     if (today.getMonth() < targetDate.getMonth() || (today.getMonth() === targetDate.getMonth() && today.getDate() < targetDate.getDate())) years--; 
     return years; 
 }
 
+// Zabezpieczone przed rokiem 0002 podczas wpisywania daty z klawiatury
 function autoFillEndDate(startStr) { 
-    if(!startStr) return; 
+    if(!startStr || startStr.length !== 10) return; 
+    let parts = startStr.split('-');
+    let y = parseInt(parts[0], 10);
+    if(isNaN(y) || y < 1990 || y > 2100) return; // Blokuje przeliczanie dopóki rok nie ma 4 sensownych cyfr (np. 2026)
+
     let d = new Date(startStr); 
+    if(isNaN(d.getTime())) return;
     d.setFullYear(d.getFullYear() + 1); 
     d.setDate(d.getDate() - 1); 
     document.getElementById('p_dateEnd').value = d.toISOString().split('T')[0]; 
-    if(!document.getElementById('p_firstPaymentDate').value) {
-        document.getElementById('p_firstPaymentDate').value = startStr;
+    
+    let fpEl = document.getElementById('p_firstPaymentDate');
+    if(fpEl && !fpEl.value) {
+        fpEl.value = startStr;
     }
 }
 
 function addMonthsToDate(dateStr, monthsToAdd) { 
-    if(!dateStr) return ""; 
+    if(!dateStr || dateStr.length !== 10) return ""; 
+    let yearCheck = parseInt(dateStr.split('-')[0], 10);
+    if(isNaN(yearCheck) || yearCheck < 1990) return "";
     let d = new Date(dateStr); 
+    if(isNaN(d.getTime())) return "";
     d.setMonth(d.getMonth() + monthsToAdd); 
     return d.toISOString().split('T')[0]; 
 }
@@ -155,12 +183,22 @@ function parsePeselToDateString(val) {
     return null; 
 }
 
+// Zarządzanie bazą marek pojazdów
 function renderBrandsDatalist() {
     let dl = document.getElementById('popularBrandsList');
-    if(!dl) return;
-    dl.innerHTML = "";
-    customBrandsList.sort().forEach(b => {
-        dl.innerHTML += `<option value="${b}">`;
+    let tbody = document.getElementById('brandsLibraryBody');
+    if(dl) dl.innerHTML = "";
+    if(tbody) tbody.innerHTML = "";
+    
+    customBrandsList.sort((a,b) => a.localeCompare(b)).forEach((b, idx) => {
+        if(dl) dl.innerHTML += `<option value="${b}">`;
+        if(tbody) {
+            tbody.innerHTML += `
+                <tr class="hover:bg-luxBg">
+                    <td class="p-2.5 font-bold">${b}</td>
+                    <td class="p-2.5 text-right"><button onclick="deleteBrandFromSettings(${idx})" class="text-red-500 text-xs font-bold hover:underline">Usuń</button></td>
+                </tr>`;
+        }
     });
 }
 
@@ -175,6 +213,24 @@ function rememberBrand(brandStr) {
     }
 }
 
+function addBrandFromSettings() {
+    let inp = document.getElementById('set_newBrand');
+    if(!inp) return;
+    let val = inp.value.trim();
+    if(val) {
+        rememberBrand(val);
+        inp.value = "";
+        syncAndRender();
+    }
+}
+
+function deleteBrandFromSettings(idx) {
+    if(confirm("Usunąć markę z listy podpowiedzi?")) {
+        customBrandsList.splice(idx, 1);
+        syncAndRender();
+    }
+}
+
 function handleGlobalSearch(query) {
     query = query.toLowerCase().trim(); 
     let resBox = document.getElementById('globalSearchResults'); 
@@ -186,7 +242,16 @@ function handleGlobalSearch(query) {
     if(foundClients.length > 0) {
         html += `<div class="p-2 bg-luxBg text-xs font-bold text-textMuted uppercase sticky top-0">Klienci</div>`;
         foundClients.forEach(c => { 
-            html += `<div onclick="openClientFull(${c.id}); document.getElementById('globalSearchResults').classList.add('hidden'); document.getElementById('globalSearch').value='';" class="p-3 hover:bg-amber-50 cursor-pointer border-b border-luxBorder"><span class="font-bold text-textDark">${c.name}</span> <span class="text-xs text-textMuted font-mono ml-2">(${c.pesel || c.nip || 'brak'})</span></div>`; 
+            html += `<div onclick="openClientFull('${c.id}'); document.getElementById('globalSearchResults').classList.add('hidden'); document.getElementById('globalSearch').value='';" class="p-3 hover:bg-amber-50 cursor-pointer border-b border-luxBorder"><span class="font-bold text-textDark">${c.name}</span> <span class="text-xs text-textMuted font-mono ml-2">(${c.pesel || c.nip || 'brak'})</span></div>`; 
+        });
+    }
+
+    let foundVehicles = vehiclesList.filter(v => (v.plate && v.plate.toLowerCase().includes(query)) || (v.vin && v.vin.toLowerCase().includes(query)) || (v.brand && v.brand.toLowerCase().includes(query)));
+    if(foundVehicles.length > 0) {
+        html += `<div class="p-2 bg-luxBg text-xs font-bold text-textMuted uppercase sticky top-0">Pojazdy w garażu</div>`;
+        foundVehicles.forEach(v => {
+            let c = clientsList.find(x => String(x.id) === String(v.clientId));
+            html += `<div onclick="openClientFull('${v.clientId}'); document.getElementById('globalSearchResults').classList.add('hidden'); document.getElementById('globalSearch').value='';" class="p-3 hover:bg-amber-50 cursor-pointer border-b border-luxBorder"><span class="font-bold text-blue-700">🚗 ${v.brand} ${v.model || ''} (${v.plate})</span> <span class="text-xs text-textMuted ml-1">${c ? '- ' + c.name : ''}</span></div>`;
         });
     }
     
@@ -194,7 +259,7 @@ function handleGlobalSearch(query) {
     if(foundPolicies.length > 0) {
         html += `<div class="p-2 bg-luxBg text-xs font-bold text-textMuted uppercase sticky top-0">Polisy</div>`;
         foundPolicies.forEach(p => { 
-            html += `<div onclick="openDrawer('policy', ${p.id}); document.getElementById('globalSearchResults').classList.add('hidden'); document.getElementById('globalSearch').value='';" class="p-3 hover:bg-amber-50 cursor-pointer border-b border-luxBorder"><span class="font-bold text-goldAccent">${p.subject || 'Polisa'}</span> <span class="text-xs text-textDark ml-1">${p.number ? '['+p.number+']' : ''}</span></div>`; 
+            html += `<div onclick="openDrawer('policy', '${p.id}'); document.getElementById('globalSearchResults').classList.add('hidden'); document.getElementById('globalSearch').value='';" class="p-3 hover:bg-amber-50 cursor-pointer border-b border-luxBorder"><span class="font-bold text-goldAccent">${p.subject || 'Polisa'}</span> <span class="text-xs text-textDark ml-1">${p.number ? '['+p.number+']' : ''}</span></div>`; 
         });
     }
     
@@ -203,7 +268,7 @@ function handleGlobalSearch(query) {
     resBox.classList.remove('hidden');
 }
 
-// ================= 4. NOTATNIK, TASKI (TO-DO) ORAZ CEL MIESIĘCZNY =================
+// ================= 4. NOTATNIK, TASKI, CEL =================
 function saveQuickNotes() {
     let el = document.getElementById('quickNotesArea');
     if(!el) return;
@@ -225,7 +290,7 @@ function addTask() {
 }
 
 function toggleTask(id) {
-    let t = tasksList.find(x => x.id === id);
+    let t = tasksList.find(x => String(x.id) === String(id));
     if(t) {
         t.done = !t.done;
         syncAndRender();
@@ -233,7 +298,7 @@ function toggleTask(id) {
 }
 
 function deleteTask(id) {
-    tasksList = tasksList.filter(x => x.id !== id);
+    tasksList = tasksList.filter(x => String(x.id) !== String(id));
     syncAndRender();
 }
 
@@ -256,10 +321,10 @@ function renderTasks() {
         box.innerHTML += `
             <div class="flex items-center justify-between bg-white px-2.5 py-1.5 rounded-lg border border-amber-200/80 text-xs">
                 <label class="flex items-center gap-2 cursor-pointer flex-grow pr-2">
-                    <input type="checkbox" ${t.done ? 'checked' : ''} onchange="toggleTask(${t.id})" class="accent-amber-700 w-3.5 h-3.5 cursor-pointer">
+                    <input type="checkbox" ${t.done ? 'checked' : ''} onchange="toggleTask('${t.id}')" class="accent-amber-700 w-3.5 h-3.5 cursor-pointer">
                     <span class="${textStyle}">${t.text}</span>
                 </label>
-                <button onclick="deleteTask(${t.id})" class="text-red-400 hover:text-red-600 font-bold px-1">&times;</button>
+                <button onclick="deleteTask('${t.id}')" class="text-red-400 hover:text-red-600 font-bold px-1">&times;</button>
             </div>`;
     });
 }
@@ -279,42 +344,32 @@ function editMonthlyGoal() {
     }
 }
 
-// ================= 5. DEDYKOWANY WYDRUK "PLAN NA DZIŚ" =================
+// ================= 5. WYDRUK PLANU DNIA =================
 function printTodayPlan() {
     let today = new Date();
     today.setHours(0,0,0,0);
     let next7Days = new Date(today); next7Days.setDate(today.getDate() + 7);
-    let next30Days = new Date(today); next30Days.setDate(today.getDate() + 30);
     let currentMonth = today.getMonth() + 1;
 
     document.getElementById('print_todayDate').innerText = today.toLocaleDateString('pl-PL', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 
-    let tasksHtml = '';
-    let instHtml = '';
-    let renewalsHtml = '';
-    let inspHtml = '';
-    let birthHtml = '';
+    let tasksHtml = '', instHtml = '', renewalsHtml = '', inspHtml = '', birthHtml = '';
 
-    // 1. Zadania po-polisowe, raty i wznowienia
     policiesList.forEach(p => {
-        let c = clientsList.find(x => x.id === p.clientId);
-        let cName = c ? c.name : "Nieznany klient";
+        if(p.settlementStatus === 'anulowana') return;
+        let c = clientsList.find(x => String(x.id) === String(p.clientId));
+        let cName = c ? c.name : "Klient";
         let cPhone = (c && c.phone) ? ` | tel. ${c.phone}` : "";
 
-        if(p.reqAc && !p.acDone) {
-            tasksHtml += `<div class="py-1 border-b border-gray-100">☐ <b>[ZDJĘCIA AC]</b> ${cName}${cPhone} – ${p.insurer} (${p.subject})</div>`;
-        }
-        if(p.reqOc && !p.ocDone) {
-            tasksHtml += `<div class="py-1 border-b border-gray-100">☐ <b>[WYPOWIEDZENIE OC]</b> ${cName}${cPhone} – ${p.insurer} (${p.subject})</div>`;
-        }
+        if(p.reqAc && !p.acDone) tasksHtml += `<div class="py-1 border-b border-gray-100">☐ <b>[ZDJĘCIA AC]</b> ${cName}${cPhone} – ${p.insurer} (${p.subject})</div>`;
+        if(p.reqOc && !p.ocDone) tasksHtml += `<div class="py-1 border-b border-gray-100">☐ <b>[WYPOWIEDZENIE OC]</b> ${cName}${cPhone} – ${p.insurer} (${p.subject})</div>`;
 
-        // Raty
         if(p.firstPaymentDate && !p.firstPaymentPaid) {
             let dFP = new Date(p.firstPaymentDate);
-            let amt = p.installments > 1 && p.installmentDates && p.installmentDates[2] ? p.installmentDates[2].amount : p.premium;
+            let amt = getFirstInstallmentAmount(p);
             if(dFP <= next7Days) {
                 let status = dFP < today ? "ZALEGŁA" : "Nadchodząca";
-                instHtml += `<div class="py-1 border-b border-gray-100">☐ <b>[${status} - ${p.firstPaymentDate}]</b> ${cName}${cPhone} – ${p.insurer} (${p.installments > 1 ? 'I rata' : 'Opłata'}: ${formatPLN(amt)})</div>`;
+                instHtml += `<div class="py-1 border-b border-gray-100">☐ <b>[${status} - ${p.firstPaymentDate}]</b> ${cName}${cPhone} – ${p.insurer} (${formatPLN(amt)})</div>`;
             }
         }
         if(p.installments > 1 && p.installmentDates) {
@@ -330,23 +385,21 @@ function printTodayPlan() {
             }
         }
 
-        // Wznowienia 30 dni
         if(p.dateEnd) {
             let dEnd = new Date(p.dateEnd);
             let diffDays = Math.ceil((dEnd - today) / (1000 * 60 * 60 * 24));
             if(diffDays >= 0 && diffDays <= 30) {
-                renewalsHtml += `<div class="py-1 border-b border-gray-100">☐ <b>[Koniec: ${p.dateEnd} - za ${diffDays} dni]</b> ${cName}${cPhone} – ${p.insurer} | ${p.subject}</div>`;
+                renewalsHtml += `<div class="py-1 border-b border-gray-100">☐ <b>[Koniec za ${diffDays} dni]</b> ${cName}${cPhone} – ${p.insurer} | ${p.subject}</div>`;
             }
         }
     });
 
-    // Obce polisy do przejęcia
     externalPoliciesList.forEach(ep => {
         if(ep.dateEnd) {
             let eEnd = new Date(ep.dateEnd);
             let diffDays = Math.ceil((eEnd - today) / (1000 * 60 * 60 * 24));
             if(diffDays >= 0 && diffDays <= 45) {
-                let c = clientsList.find(x => x.id === ep.clientId);
+                let c = clientsList.find(x => String(x.id) === String(ep.clientId));
                 let cName = c ? c.name : "Klient";
                 let cPhone = (c && c.phone) ? ` | tel. ${c.phone}` : "";
                 renewalsHtml += `<div class="py-1 border-b border-gray-100">☐ <b>[PRZEJĘCIE OBCEJ: ${ep.dateEnd}]</b> ${cName}${cPhone} – ${ep.subject}</div>`;
@@ -354,13 +407,12 @@ function printTodayPlan() {
         }
     });
 
-    // Przeglądy
     vehiclesList.forEach(v => {
         if(v.inspection) {
             let insp = new Date(v.inspection);
             let diffDays = Math.ceil((insp - today) / (1000 * 60 * 60 * 24));
             if(diffDays >= 0 && diffDays <= 30) {
-                let c = clientsList.find(x => x.id === v.clientId);
+                let c = clientsList.find(x => String(x.id) === String(v.clientId));
                 let cName = c ? c.name : "";
                 let cPhone = (c && c.phone) ? ` (${c.phone})` : "";
                 inspHtml += `<div class="py-1 border-b border-gray-100">☐ <b>${v.plate}</b> (${v.brand} ${v.model || ''}) – ${v.inspection} | ${cName}${cPhone}</div>`;
@@ -368,7 +420,6 @@ function printTodayPlan() {
         }
     });
 
-    // Urodziny
     clientsList.forEach(c => {
         if(c.birth) {
             let bDate = new Date(c.birth);
@@ -380,30 +431,27 @@ function printTodayPlan() {
         }
     });
 
-    // Taski i notatki
     let notesAndTasksHtml = '';
     let activeTasks = tasksList.filter(t => !t.done);
     if(activeTasks.length > 0) {
         notesAndTasksHtml += `<div class="font-bold mb-1">Lista zadań (To-Do):</div>`;
-        activeTasks.forEach(t => {
-            notesAndTasksHtml += `<div>☐ ${t.text}</div>`;
-        });
+        activeTasks.forEach(t => { notesAndTasksHtml += `<div>☐ ${t.text}</div>`; });
     }
     if(quickNotesText && quickNotesText.trim() !== "") {
         notesAndTasksHtml += `<div class="font-bold mt-2 mb-1">Notatki podręczne:</div><div>${quickNotesText}</div>`;
     }
 
-    document.getElementById('print_tasksList').innerHTML = tasksHtml || '<p class="text-gray-400 italic">Brak zaległych zadań po-polisowych.</p>';
-    document.getElementById('print_installmentsList').innerHTML = instHtml || '<p class="text-gray-400 italic">Brak rat wymagających interwencji.</p>';
-    document.getElementById('print_renewalsList').innerHTML = renewalsHtml || '<p class="text-gray-400 italic">Brak kończących się polis w najbliższych 30 dniach.</p>';
-    document.getElementById('print_inspectionsList').innerHTML = inspHtml || '<p class="text-gray-400 italic">Brak kończących się przeglądów.</p>';
-    document.getElementById('print_birthdaysList').innerHTML = birthHtml || '<p class="text-gray-400 italic">Brak urodzin w tym miesiącu.</p>';
-    document.getElementById('print_notesTasks').innerHTML = notesAndTasksHtml || '<p class="text-gray-400 italic">Brak dodatkowych zadań i notatek.</p>';
+    document.getElementById('print_tasksList').innerHTML = tasksHtml || '<p class="text-gray-400 italic">Brak zaległych zadań.</p>';
+    document.getElementById('print_installmentsList').innerHTML = instHtml || '<p class="text-gray-400 italic">Brak rat.</p>';
+    document.getElementById('print_renewalsList').innerHTML = renewalsHtml || '<p class="text-gray-400 italic">Brak wznowień.</p>';
+    document.getElementById('print_inspectionsList').innerHTML = inspHtml || '<p class="text-gray-400 italic">Brak przeglądów.</p>';
+    document.getElementById('print_birthdaysList').innerHTML = birthHtml || '<p class="text-gray-400 italic">Brak urodzin.</p>';
+    document.getElementById('print_notesTasks').innerHTML = notesAndTasksHtml || '<p class="text-gray-400 italic">Brak notatek.</p>';
 
     window.print();
 }
 
-// ================= 6. KLIENCI, GARAŻ, LOKALE =================
+// ================= 6. KLIENCI, GARAŻ (Z EDYCJĄ I DOWODEM), LOKALE =================
 function saveNewClient() {
     let name = document.getElementById('addName').value.trim(); 
     let pesel = document.getElementById('addPesel').value.trim();
@@ -432,7 +480,8 @@ function saveNewClient() {
 }
 
 function renderClients() {
-    const query = document.getElementById('searchClient') ? document.getElementById('searchClient').value.toLowerCase() : ""; 
+    const searchEl = document.getElementById('searchClient');
+    const query = searchEl ? searchEl.value.toLowerCase() : ""; 
     const tbody = document.getElementById('clientsTableBody'); 
     if(!tbody) return; 
     tbody.innerHTML = '';
@@ -446,10 +495,16 @@ function renderClients() {
         let age = c.birth ? calculateYears(c.birth) + " lat" : "-"; 
         let licenseStr = c.licenseDate ? `<span class="text-goldAccent font-semibold">${c.licenseDate}</span>` : `-`;
         let icon = c.nip ? '🏢' : '👤';
+        let idStr = c.pesel ? `PESEL: ${c.pesel}` : `NIP: ${c.nip || '-'}`;
+        let rawIdToCopy = c.pesel || c.nip || '';
+        
         tbody.innerHTML += `
-            <tr class="hover:bg-luxBg/60 transition-all cursor-pointer border-l-4 border-transparent hover:border-goldAccent" onclick="openClientFull(${c.id})">
+            <tr class="hover:bg-luxBg/60 transition-all cursor-pointer border-l-4 border-transparent hover:border-goldAccent" onclick="openClientFull('${c.id}')">
                 <td class="p-4 font-semibold text-textDark">${icon} ${c.name}</td>
-                <td class="p-4 text-textMuted font-mono text-xs">${c.pesel ? 'PESEL: '+c.pesel : 'NIP: '+(c.nip||'-')}</td>
+                <td class="p-4 text-textMuted font-mono text-xs">
+                    ${idStr}
+                    ${rawIdToCopy ? `<button onclick="event.stopPropagation(); copyToClipboard('${rawIdToCopy}', 'PESEL/NIP')" class="ml-1.5 text-[10px] bg-gray-100 hover:bg-gray-200 px-1.5 py-0.5 rounded font-sans font-bold" title="Kopiuj">📋</button>` : ''}
+                </td>
                 <td class="p-4 text-textMuted text-xs">P.J.: ${licenseStr}<br>Wiek: ${age}</td>
                 <td class="p-4 text-textMuted text-xs">📞 ${c.phone || '-'}<br>✉️ ${c.email || '-'}</td>
             </tr>`;
@@ -457,9 +512,9 @@ function renderClients() {
 }
 
 function populateClientFull(id) {
-    const c = clientsList.find(x => x.id === id); 
+    const c = clientsList.find(x => String(x.id) === String(id)); 
     if(!c) return;
-    currentOpenId = id;
+    currentOpenId = c.id;
     document.getElementById('cfm_name').innerText = c.name; 
     document.getElementById('cfm_pesel').innerText = c.pesel ? `PESEL: ${c.pesel}` : `NIP: ${c.nip || '-'}`;
     document.getElementById('cv_phone').innerText = c.phone || "-"; 
@@ -475,16 +530,22 @@ function populateClientFull(id) {
     document.getElementById('cfm_editMode').classList.add('hidden'); 
     document.getElementById('cfm_btnEdit').innerText = "Edytuj";
     
-    renderClientVehicles(id); 
-    renderClientProperties(id); 
-    renderClientPolicies(id); 
-    renderExternalPolicies(id);
+    renderClientVehicles(c.id); 
+    renderClientProperties(c.id); 
+    renderClientPolicies(c.id); 
+    renderExternalPolicies(c.id);
 }
 
+// Niezawodny zapis edycji klienta
 function saveCfmEdits() {
-    let c = clientsList.find(x => x.id === currentOpenId);
-    if(!c) return;
-    c.name = document.getElementById('ce_name').value.trim(); 
+    let idx = clientsList.findIndex(x => String(x.id) === String(currentOpenId));
+    if(idx === -1) return alert("Błąd identyfikacji klienta!");
+    
+    let c = clientsList[idx];
+    let newName = document.getElementById('ce_name').value.trim();
+    if(!newName) return alert("Pole Imię i nazwisko / Nazwa firmy nie może być puste!");
+
+    c.name = newName; 
     c.pesel = document.getElementById('ce_pesel').value.trim(); 
     c.nip = document.getElementById('ce_nip').value.trim(); 
     c.regon = document.getElementById('ce_regon').value.trim();
@@ -494,55 +555,103 @@ function saveCfmEdits() {
     c.licenseDate = document.getElementById('ce_license').value; 
     c.address = document.getElementById('ce_address').value.trim(); 
     c.source = document.getElementById('ce_source').value.trim();
+    
     if(c.pesel.length === 11 && !c.birth) {
         c.birth = parsePeselToDateString(c.pesel) || "";
     }
+    
     syncAndRender(); 
-    openClientFull(c.id);
+    populateClientFull(c.id);
+    
+    let toast = document.getElementById('copyToast');
+    if(toast) {
+        toast.innerText = `✅ Zapisano zmiany w karcie klienta!`;
+        toast.classList.remove('hidden');
+        setTimeout(() => toast.classList.add('hidden'), 2000);
+    }
 }
 
 function deleteCurrentClient() { 
     if(confirm("Usunąć trwale klienta, jego polisy i auta?")) { 
-        clientsList = clientsList.filter(c => c.id !== currentOpenId); 
-        policiesList = policiesList.filter(p => p.clientId !== currentOpenId); 
-        vehiclesList = vehiclesList.filter(v => v.clientId !== currentOpenId); 
-        propertiesList = propertiesList.filter(p => p.clientId !== currentOpenId); 
-        externalPoliciesList = externalPoliciesList.filter(p => p.clientId !== currentOpenId);
+        clientsList = clientsList.filter(c => String(c.id) !== String(currentOpenId)); 
+        policiesList = policiesList.filter(p => String(p.clientId) !== String(currentOpenId)); 
+        vehiclesList = vehiclesList.filter(v => String(v.clientId) !== String(currentOpenId)); 
+        propertiesList = propertiesList.filter(p => String(p.clientId) !== String(currentOpenId)); 
+        externalPoliciesList = externalPoliciesList.filter(p => String(p.clientId) !== String(currentOpenId));
         closeClientFull(); 
         syncAndRender(); 
     } 
 }
 
-// Garaż (z podziałem na Markę i Model)
+// GARAŻ: Zapis i edycja pojazdu z pełnymi danymi z dowodu rejestracyjnego
 function saveVehicle() { 
     let brand = document.getElementById('v_brand').value.trim(); 
-    let model = document.getElementById('v_model') ? document.getElementById('v_model').value.trim() : "";
-    let plate = document.getElementById('v_plate').value.trim(); 
-    if(!brand || !plate) return alert("Podaj markę i numer rejestracyjny!"); 
+    let model = document.getElementById('v_model').value.trim();
+    let plate = document.getElementById('v_plate').value.trim().toUpperCase(); 
+    if(!brand || !plate) return alert("Podaj markę i numer rejestracyjny pojazdu!"); 
     
     rememberBrand(brand);
 
-    vehiclesList.push({ 
-        id: Date.now(), 
+    let vData = { 
+        id: editingVehicleId || Date.now(), 
         clientId: currentOpenId, 
         brand: brand, 
         model: model,
-        year: document.getElementById('v_year').value, 
-        plate: plate.toUpperCase(), 
-        vin: document.getElementById('v_vin').value.toUpperCase(),
+        year: document.getElementById('v_year').value,
+        cap: document.getElementById('v_cap').value,
+        kw: document.getElementById('v_kw').value,
+        km: document.getElementById('v_km').value,
+        mileage: document.getElementById('v_mileage').value,
+        plate: plate, 
+        vin: document.getElementById('v_vin').value.trim().toUpperCase(),
+        firstReg: document.getElementById('v_firstReg').value,
         inspection: document.getElementById('v_inspection').value, 
         anglik: document.getElementById('v_anglik').checked 
-    }); 
-    toggleAddVehicle(); 
+    };
+
+    if(editingVehicleId) {
+        let idx = vehiclesList.findIndex(v => String(v.id) === String(editingVehicleId));
+        if(idx >= 0) vehiclesList[idx] = vData;
+        editingVehicleId = null;
+    } else {
+        vehiclesList.push(vData); 
+    }
+
+    document.getElementById('cfm_addVehicleBox').classList.add('hidden');
     syncAndRender(); 
-    openClientFull(currentOpenId); 
+    populateClientFull(currentOpenId); 
+}
+
+function editVehicle(id) {
+    let v = vehiclesList.find(x => String(x.id) === String(id));
+    if(!v) return;
+    editingVehicleId = v.id;
+    let box = document.getElementById('cfm_addVehicleBox');
+    box.classList.remove('hidden');
+    
+    let titleEl = document.getElementById('v_formTitle');
+    if(titleEl) titleEl.innerText = `Edycja pojazdu: ${v.brand} (${v.plate})`;
+
+    document.getElementById('v_brand').value = v.brand || "";
+    document.getElementById('v_model').value = v.model || "";
+    document.getElementById('v_year').value = v.year || "";
+    document.getElementById('v_cap').value = v.cap || "";
+    document.getElementById('v_kw').value = v.kw || "";
+    document.getElementById('v_km').value = v.km || "";
+    document.getElementById('v_mileage').value = v.mileage || "";
+    document.getElementById('v_plate').value = v.plate || "";
+    document.getElementById('v_vin').value = v.vin || "";
+    document.getElementById('v_firstReg').value = v.firstReg || "";
+    document.getElementById('v_inspection').value = v.inspection || "";
+    document.getElementById('v_anglik').checked = v.anglik || false;
+    document.getElementById('v_brand').focus();
 }
 
 function deleteVehicle(id) { 
-    if(confirm("Usunąć pojazd?")) { 
-        vehiclesList = vehiclesList.filter(v => v.id !== id); 
+    if(confirm("Usunąć pojazd z garażu?")) { 
+        vehiclesList = vehiclesList.filter(v => String(v.id) !== String(id)); 
         syncAndRender(); 
-        openClientFull(currentOpenId); 
+        populateClientFull(currentOpenId); 
     } 
 }
 
@@ -550,21 +659,51 @@ function renderClientVehicles(clientId) {
     let container = document.getElementById('cfm_vehiclesList'); 
     if(!container) return;
     container.innerHTML = ''; 
-    let vList = vehiclesList.filter(v => v.clientId === clientId); 
+    let vList = vehiclesList.filter(v => String(v.clientId) === String(clientId)); 
     if(vList.length === 0) {
-        container.innerHTML = "<p class='text-xs text-textMuted'>Brak pojazdów.</p>"; 
+        container.innerHTML = "<p class='text-xs text-textMuted'>Brak pojazdów w garażu.</p>"; 
         return;
     }
     vList.forEach(v => { 
         let alerts = "";
-        if(v.anglik) alerts += `<span class="text-[10px] bg-red-100 text-red-700 px-1 rounded ml-1 font-bold">🇬🇧 Anglik</span>`;
-        if(v.inspection) alerts += `<span class="text-[10px] bg-blue-100 text-blue-700 px-1 rounded ml-1 font-bold">Przegląd: ${v.inspection}</span>`;
+        if(v.anglik) alerts += `<span class="text-[10px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-bold">🇬🇧 Anglik</span> `;
+        if(v.inspection) alerts += `<span class="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-bold">🔧 Przegląd: ${v.inspection}</span>`;
+        
         let fullCarName = `${v.brand} ${v.model || ''}`.trim();
+        
         container.innerHTML += `
-            <div class="bg-luxBg p-3 rounded-lg border border-luxBorder relative group">
-                <button onclick="deleteVehicle(${v.id})" class="absolute top-2 right-2 text-red-400 hover:text-red-600 hidden group-hover:block font-bold">&times;</button>
-                <p class="font-bold text-textDark">🚗 ${fullCarName} <span class="text-xs text-textMuted">${v.year ? v.year+'r.' : ''}</span> ${alerts}</p>
-                <p class="text-sm font-mono text-goldAccent font-semibold">${v.plate} ${v.vin ? '<span class="text-textMuted text-xs ml-2">VIN: '+v.vin+'</span>' : ''}</p>
+            <div class="bg-luxBg p-3.5 rounded-xl border border-luxBorder space-y-2">
+                <div class="flex items-start justify-between border-b border-gray-200 pb-2">
+                    <div>
+                        <p class="font-bold text-textDark text-sm">🚗 ${fullCarName} ${v.year ? `<span class="text-xs font-semibold text-goldAccent">(${v.year} r.)</span>` : ''}</p>
+                        <div class="mt-1">${alerts}</div>
+                    </div>
+                    <div class="flex gap-1.5">
+                        <button onclick="editVehicle('${v.id}')" class="text-[11px] bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100 px-2 py-0.5 rounded font-bold">✏️ Edytuj</button>
+                        <button onclick="deleteVehicle('${v.id}')" class="text-[11px] bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 px-2 py-0.5 rounded font-bold">&times;</button>
+                    </div>
+                </div>
+                
+                <!-- Kafelki danych z dowodu z przyciskami szybkiego kopiowania -->
+                <div class="grid grid-cols-2 gap-1.5 text-xs">
+                    <div class="bg-white p-1.5 rounded border border-gray-200 flex justify-between items-center">
+                        <div><span class="text-[9px] text-textMuted uppercase block">Nr Rejestracyjny</span><span class="font-mono font-bold text-textDark">${v.plate || '-'}</span></div>
+                        ${v.plate ? `<button onclick="copyToClipboard('${v.plate}', 'Nr rej.')" class="text-xs bg-gray-100 hover:bg-gray-200 px-1.5 py-1 rounded">📋</button>` : ''}
+                    </div>
+                    <div class="bg-white p-1.5 rounded border border-gray-200 flex justify-between items-center">
+                        <div class="overflow-hidden"><span class="text-[9px] text-textMuted uppercase block">VIN</span><span class="font-mono font-bold text-textDark text-[11px] truncate block">${v.vin || '-'}</span></div>
+                        ${v.vin ? `<button onclick="copyToClipboard('${v.vin}', 'VIN')" class="text-xs bg-gray-100 hover:bg-gray-200 px-1.5 py-1 rounded ml-1">📋</button>` : ''}
+                    </div>
+                    <div class="bg-white p-1.5 rounded border border-gray-200 flex justify-between items-center">
+                        <div><span class="text-[9px] text-textMuted uppercase block">Moc (kW / KM)</span><span class="font-bold text-textDark">${v.kw || '-'} kW / ${v.km || '-'} KM</span></div>
+                        ${v.kw ? `<button onclick="copyToClipboard('${v.kw}', 'Moc kW')" class="text-[10px] bg-gray-100 hover:bg-gray-200 px-1.5 py-0.5 rounded" title="Kopiuj kW">📋kW</button>` : ''}
+                    </div>
+                    <div class="bg-white p-1.5 rounded border border-gray-200 flex justify-between items-center">
+                        <div><span class="text-[9px] text-textMuted uppercase block">Przebieg / Poj.</span><span class="font-bold text-textDark">${v.mileage ? v.mileage+' km' : '-'} ${v.cap ? `(${v.cap} cm³)` : ''}</span></div>
+                        ${v.mileage ? `<button onclick="copyToClipboard('${v.mileage}', 'Przebieg')" class="text-xs bg-gray-100 hover:bg-gray-200 px-1.5 py-1 rounded">📋</button>` : ''}
+                    </div>
+                </div>
+                ${v.firstReg ? `<div class="text-[11px] text-textMuted flex justify-between items-center pt-1"><span>📅 I rejestracja: <b class="text-textDark">${v.firstReg}</b></span> <button onclick="copyToClipboard('${v.firstReg}', 'Data I rej.')" class="text-[10px] bg-gray-100 px-1.5 py-0.5 rounded">📋 Kopiuj datę</button></div>` : ''}
             </div>`; 
     }); 
 }
@@ -578,14 +717,14 @@ function saveProperty() {
     propertiesList.push({ id: Date.now(), clientId: currentOpenId, type: t, address: a, flammable: flammable, flood: flood }); 
     toggleAddProperty(); 
     syncAndRender(); 
-    openClientFull(currentOpenId); 
+    populateClientFull(currentOpenId); 
 }
 
 function deleteProperty(id) { 
     if(confirm("Usunąć nieruchomość?")) { 
-        propertiesList = propertiesList.filter(p => p.id !== id); 
+        propertiesList = propertiesList.filter(p => String(p.id) !== String(id)); 
         syncAndRender(); 
-        openClientFull(currentOpenId); 
+        populateClientFull(currentOpenId); 
     } 
 }
 
@@ -593,7 +732,7 @@ function renderClientProperties(clientId) {
     let container = document.getElementById('cfm_propertiesList'); 
     if(!container) return;
     container.innerHTML = ''; 
-    let pList = propertiesList.filter(p => p.clientId === clientId); 
+    let pList = propertiesList.filter(p => String(p.clientId) === String(clientId)); 
     if(pList.length === 0) {
         container.innerHTML = "<p class='text-xs text-textMuted'>Brak nieruchomości.</p>"; 
         return;
@@ -603,10 +742,15 @@ function renderClientProperties(clientId) {
         if(p.flammable) alerts += `<span class="text-[10px] bg-red-100 text-red-700 px-1 rounded ml-1 font-bold">🔥 Palne</span>`;
         if(p.flood) alerts += `<span class="text-[10px] bg-blue-100 text-blue-700 px-1 rounded ml-1 font-bold">🌊 Zalewowe</span>`;
         container.innerHTML += `
-            <div class="bg-luxBg p-3 rounded-lg border border-luxBorder relative group">
-                <button onclick="deleteProperty(${p.id})" class="absolute top-2 right-2 text-red-400 hidden group-hover:block font-bold">&times;</button>
-                <p class="font-bold text-textDark">🏠 ${p.type} ${alerts}</p>
-                <p class="text-sm text-textMuted">${p.address || 'Brak'}</p>
+            <div class="bg-luxBg p-3 rounded-lg border border-luxBorder relative group flex justify-between items-center">
+                <div>
+                    <p class="font-bold text-textDark">🏠 ${p.type} ${alerts}</p>
+                    <p class="text-sm text-textMuted">${p.address || 'Brak'}</p>
+                </div>
+                <div class="flex gap-1">
+                    <button onclick="copyToClipboard('${p.address}', 'Adres lokalu')" class="text-xs bg-gray-200 px-2 py-1 rounded">📋</button>
+                    <button onclick="deleteProperty('${p.id}')" class="text-red-400 hover:text-red-600 font-bold px-2">&times;</button>
+                </div>
             </div>`; 
     }); 
 }
@@ -619,20 +763,20 @@ function saveExternalPolicy() {
     document.getElementById('ext_subject').value = ""; 
     document.getElementById('ext_date').value = "";
     syncAndRender(); 
-    openClientFull(currentOpenId);
+    populateClientFull(currentOpenId);
 }
 
 function deleteExternalPolicy(id) { 
-    externalPoliciesList = externalPoliciesList.filter(p => p.id !== id); 
+    externalPoliciesList = externalPoliciesList.filter(p => String(p.id) !== String(id)); 
     syncAndRender(); 
-    openClientFull(currentOpenId); 
+    populateClientFull(currentOpenId); 
 }
 
 function renderExternalPolicies(clientId) {
     let container = document.getElementById('cfm_externalList'); 
     if(!container) return;
     container.innerHTML = '';
-    let extList = externalPoliciesList.filter(p => p.clientId === clientId);
+    let extList = externalPoliciesList.filter(p => String(p.clientId) === String(clientId));
     if(extList.length === 0) {
         container.innerHTML = "<p class='text-xs text-textMuted'>Brak zapisanych obcych polis.</p>";
         return;
@@ -643,14 +787,14 @@ function renderExternalPolicies(clientId) {
                 <span class="font-bold text-textDark">🎯 ${p.subject}</span>
                 <div>
                     <span class="text-red-500 font-bold mr-2">${p.dateEnd}</span>
-                    <button onclick="deleteExternalPolicy(${p.id})" class="text-red-400 hover:text-red-600 font-bold">&times;</button>
+                    <button onclick="deleteExternalPolicy('${p.id}')" class="text-red-400 hover:text-red-600 font-bold">&times;</button>
                 </div>
             </div>`;
     });
 }
 
 function renderClientPolicies(clientId) { 
-    let cPolicies = policiesList.filter(p => p.clientId === clientId); 
+    let cPolicies = policiesList.filter(p => String(p.clientId) === String(clientId)); 
     let pContainer = document.getElementById('cfm_policiesList'); 
     if(!pContainer) return;
     pContainer.innerHTML = ''; 
@@ -663,14 +807,20 @@ function renderClientPolicies(clientId) {
     nextWeek.setDate(today.getDate() + 7); 
     cPolicies.forEach(p => { 
         let alertHtml = ''; 
-        if(p.firstPaymentDate && !p.firstPaymentPaid && new Date(p.firstPaymentDate) <= nextWeek) {
+        if(p.firstPaymentDate && !p.firstPaymentPaid && new Date(p.firstPaymentDate) <= nextWeek && p.settlementStatus !== 'anulowana') {
             alertHtml = `<div class="mt-1 text-[10px] text-red-600 font-bold animate-pulse">⚠️ Rata / Wpłata!</div>`; 
         }
+        let setBadge = "";
+        if(p.settlementStatus === 'rozliczona') setBadge = `<span class="text-[9px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded ml-1 font-bold">✅ Rozliczona</span>`;
+        else if(p.settlementStatus === 'anulowana') setBadge = `<span class="text-[9px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded ml-1 font-bold">❌ Wypowiedziana</span>`;
+        else setBadge = `<span class="text-[9px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded ml-1 font-bold">⏳ Nierozliczona</span>`;
+
         pContainer.innerHTML += `
-            <div onclick="openDrawer('policy', ${p.id})" class="bg-luxBg p-3 rounded-xl border border-luxBorder flex justify-between items-start cursor-pointer hover:border-goldAccent transition-all">
+            <div onclick="openDrawer('policy', '${p.id}')" class="bg-luxBg p-3 rounded-xl border border-luxBorder flex justify-between items-start cursor-pointer hover:border-goldAccent transition-all">
                 <div>
-                    <span class="text-xs font-bold text-goldAccent uppercase">${p.insurer}</span>
+                    <span class="text-xs font-bold text-goldAccent uppercase">${p.insurer} ${setBadge}</span>
                     <p class="text-sm font-semibold text-textDark">${p.type} <span class="text-xs text-textMuted font-normal">(${p.subject || '-'})</span></p>
+                    <p class="text-xs text-green-700 font-bold mt-0.5">Prowizja: ${formatPLN(p.commissionAmt)}</p>
                     ${alertHtml}
                 </div>
                 <div class="text-right">
@@ -681,7 +831,7 @@ function renderClientPolicies(clientId) {
     }); 
 }
 
-// ================= 7. KREATOR POLISY I SZUFLADA (NAPRAWIONE KROKI 1, 3, 4) =================
+// ================= 7. KREATOR POLISY I RĘCZNA PROWIZJA =================
 function renderPolicies() {
     const tbody = document.getElementById('policiesTableBody'); 
     if(!tbody) return; 
@@ -691,28 +841,41 @@ function renderPolicies() {
         return;
     }
     policiesList.slice().sort((a,b) => new Date(b.dateStart || 0) - new Date(a.dateStart || 0)).forEach(p => {
-        let c = clientsList.find(x => x.id === p.clientId); 
-        let instText = p.installments > 1 ? `<span class="text-[10px] uppercase font-bold text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded ml-1">${p.installments} raty</span>` : "";
+        let c = clientsList.find(x => String(x.id) === String(p.clientId)); 
+        let instText = p.installments > 1 ? `<span class="text-[10px] uppercase font-bold text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded ml-1">${p.installments} rat</span>` : "";
         let newBizBadge = p.salesType === 'renewal' ? `<span class="text-[9px] bg-blue-100 text-blue-700 px-1 rounded ml-1 uppercase">Wznowienie</span>` : `<span class="text-[9px] bg-green-100 text-green-700 px-1 rounded ml-1 uppercase">Nowa</span>`;
         
+        let setBadge = "";
+        if(p.settlementStatus === 'rozliczona') setBadge = `<span class="text-[9px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded ml-1 font-bold">✅ Rozliczona</span>`;
+        else if(p.settlementStatus === 'anulowana') setBadge = `<span class="text-[9px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded ml-1 font-bold">❌ Wypowiedziana</span>`;
+        else setBadge = `<span class="text-[9px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded ml-1 font-bold">⏳ Nierozliczona</span>`;
+
         tbody.innerHTML += `
-            <tr class="hover:bg-luxBg/60 transition-all cursor-pointer border-l-4 border-transparent hover:border-goldAccent" onclick="openDrawer('policy', ${p.id})">
-                <td class="p-4"><span class="font-bold text-textDark">${p.insurer} ${newBizBadge}</span><br><span class="text-xs font-mono text-textMuted">${p.number || 'Brak nr'}</span></td>
-                <td class="p-4 font-semibold text-goldAccent hover:underline" onclick="event.stopPropagation(); openClientFull(${p.clientId})">${c ? c.name : "Nieznany"}</td>
+            <tr class="hover:bg-luxBg/60 transition-all cursor-pointer border-l-4 border-transparent hover:border-goldAccent" onclick="openDrawer('policy', '${p.id}')">
+                <td class="p-4">
+                    <span class="font-bold text-textDark">${p.insurer} ${newBizBadge} ${setBadge}</span><br>
+                    <span class="text-xs font-mono text-textMuted">${p.number || 'Brak nr'}</span>
+                    ${p.number ? `<button onclick="event.stopPropagation(); copyToClipboard('${p.number}', 'Nr polisy')" class="ml-1 text-[10px] bg-gray-100 px-1 rounded">📋</button>` : ''}
+                </td>
+                <td class="p-4 font-semibold text-goldAccent hover:underline" onclick="event.stopPropagation(); openClientFull('${p.clientId}')">${c ? c.name : "Nieznany"}</td>
                 <td class="p-4 text-textMuted text-xs">Okres: <span class="font-bold text-textDark">${p.dateStart || '-'} <span class="font-normal mx-1">do</span> <span class="text-red-500">${p.dateEnd || '-'}</span></span><br>Przedmiot: ${p.subject || '-'}</td>
-                <td class="p-4 text-right font-bold text-textDark">${formatPLN(p.premium)} ${instText}</td>
+                <td class="p-4 text-right">
+                    <span class="font-bold text-textDark block">${formatPLN(p.premium)} ${instText}</span>
+                    <span class="text-xs font-bold text-green-700">Prowizja: ${formatPLN(p.commissionAmt)}</span>
+                </td>
             </tr>`;
     });
 }
 
 function populatePolicyModal(editId = null, prefillClientId = null) {
-    // 1. Zawsze pełny reset formularza (brak niechcianego zapamiętywania starego PESEL-u)
     selectedClientIdForPolicy = null; 
     tempPolicyRisks = []; 
+    isManualCommission = false;
     currentPolicyStep = 1; 
     editingPolicyId = editId;
 
     document.getElementById('policyModalTitle').innerText = editId ? "Edytuj polisę" : "Dodaj nową polisę";
+    document.getElementById('p_commManualBadge').classList.add('hidden');
     
     let peselInp = document.getElementById('p_peselInput');
     peselInp.value = "";
@@ -722,7 +885,7 @@ function populatePolicyModal(editId = null, prefillClientId = null) {
     document.getElementById('p_clientNotFoundBox').classList.add('hidden');
     document.getElementById('p_btnNext').disabled = true;
 
-    ['p_quickName', 'p_quickBirth', 'p_quickLicense', 'p_number', 'p_dateStart', 'p_dateEnd', 'p_carBrand', 'p_carModel', 'p_carPlate', 'p_homeAddress', 'p_riskNameInput', 'p_riskPremInput', 'p_riskPctInput', 'p_premium', 'p_commValue', 'p_firstPaymentDate'].forEach(id => {
+    ['p_quickName', 'p_quickBirth', 'p_quickLicense', 'p_number', 'p_dateStart', 'p_dateEnd', 'p_carBrand', 'p_carModel', 'p_carPlate', 'p_carVin', 'p_homeAddress', 'p_riskNameInput', 'p_riskPremInput', 'p_riskPctInput', 'p_premium', 'p_commValue', 'p_commNote', 'p_firstPaymentDate'].forEach(id => {
         let el = document.getElementById(id);
         if(el) el.value = "";
     });
@@ -740,10 +903,9 @@ function populatePolicyModal(editId = null, prefillClientId = null) {
     handlePolicyTypeChange();
     renderInsurersLibrary();
 
-    // 2. Jeśli to edycja istniejącej polisy
     if(editId) {
-        let p = policiesList.find(x => x.id === editId); 
-        let c = p ? clientsList.find(x => x.id === p.clientId) : null;
+        let p = policiesList.find(x => String(x.id) === String(editId)); 
+        let c = p ? clientsList.find(x => String(x.id) === String(p.clientId)) : null;
         if(p) {
             if(c) {
                 selectedClientIdForPolicy = c.id;
@@ -772,17 +934,24 @@ function populatePolicyModal(editId = null, prefillClientId = null) {
             document.getElementById('p_reqOc').checked = p.reqOc || false;
             document.getElementById('p_installments').value = p.installments || 1; 
             document.getElementById('p_firstPaymentDate').value = p.firstPaymentDate || "";
+            document.getElementById('p_commNote').value = p.commNote || "";
             
             if(p.risks && Array.isArray(p.risks)) {
                 tempPolicyRisks = JSON.parse(JSON.stringify(p.risks));
             }
-            renderTempRisks(); 
+            renderTempRisks();
+            
+            // Zachowaj ręcznie wpisaną składkę i prowizję z edytowanej polisy
+            document.getElementById('p_premium').value = p.premium || 0;
+            document.getElementById('p_commValue').value = p.commissionAmt || 0;
+            if(p.isManualComm) {
+                isManualCommission = true;
+                document.getElementById('p_commManualBadge').classList.remove('hidden');
+            }
             calcInstallmentsOnly(p.installmentDates);
         }
-    } 
-    // 3. Jeśli wywołano "+ Nowa Polisa" bezpośrednio z karty konkretnego klienta
-    else if(prefillClientId) { 
-        let c = clientsList.find(x => x.id == prefillClientId); 
+    } else if(prefillClientId) { 
+        let c = clientsList.find(x => String(x.id) === String(prefillClientId)); 
         if(c) { 
             selectedClientIdForPolicy = c.id;
             peselInp.value = c.pesel || c.nip || ""; 
@@ -796,6 +965,28 @@ function populatePolicyModal(editId = null, prefillClientId = null) {
 
     updatePolicyUI(); 
     updateRiskDatalist();
+}
+
+function populateGarageSelectForPolicy() {
+    let sel = document.getElementById('p_garageSelect');
+    if(!sel) return;
+    sel.innerHTML = `<option value="">-- Wybierz z garażu klienta --</option>`;
+    if(!selectedClientIdForPolicy) return;
+    let cVehicles = vehiclesList.filter(v => String(v.clientId) === String(selectedClientIdForPolicy));
+    cVehicles.forEach(v => {
+        sel.innerHTML += `<option value="${v.id}">🚗 ${v.brand} ${v.model || ''} (${v.plate})</option>`;
+    });
+}
+
+function fillVehicleFromGarage(vehId) {
+    if(!vehId) return;
+    let v = vehiclesList.find(x => String(x.id) === String(vehId));
+    if(!v) return;
+    document.getElementById('p_carBrand').value = v.brand || "";
+    document.getElementById('p_carModel').value = v.model || "";
+    document.getElementById('p_carPlate').value = v.plate || "";
+    document.getElementById('p_carVin').value = v.vin || "";
+    assembleSubjectString();
 }
 
 function resetPolicyClientChoice() {
@@ -813,8 +1004,16 @@ function handlePolicyPeselInput(inputEl) {
     let val = inputEl.value.replace(/[^0-9]/g, ''); 
     inputEl.value = val; 
     let btnNext = document.getElementById('p_btnNext');
+    let datesBox = document.getElementById('p_quickDatesBox');
+    let nameLabel = document.getElementById('p_quickNameLabel');
+    let headerLabel = document.getElementById('p_quickBoxHeader');
     
     if(val.length === 11 || val.length === 10) {
+        let isCompany = (val.length === 10);
+        if(datesBox) datesBox.classList.toggle('hidden', isCompany);
+        if(nameLabel) nameLabel.innerText = isCompany ? "Pełna nazwa firmy (dla NIP: " + val + ")" : "Imię i nazwisko klienta";
+        if(headerLabel) headerLabel.innerText = isCompany ? "🏢 Nowa Firma (NIP 10 cyfr) – wpisz nazwę firmy:" : "👤 Nowy Klient – uzupełnij dane:";
+
         let c = clientsList.find(x => (x.pesel && x.pesel === val) || (x.nip && x.nip === val));
         if(c) { 
             selectedClientIdForPolicy = c.id; 
@@ -852,8 +1051,8 @@ function saveQuickClientFromPolicy() {
         pesel: isNip ? "" : peselOrNip,
         nip: isNip ? peselOrNip : "",
         regon: "",
-        birth: document.getElementById('p_quickBirth').value || "",
-        licenseDate: document.getElementById('p_quickLicense').value || "",
+        birth: isNip ? "" : (document.getElementById('p_quickBirth').value || ""),
+        licenseDate: isNip ? "" : (document.getElementById('p_quickLicense').value || ""),
         phone: "",
         email: "",
         address: "",
@@ -869,7 +1068,6 @@ function saveQuickClientFromPolicy() {
     syncAndRender();
 }
 
-// Krok 3 - automatyczne składanie opisu przedmiotu z pól Marka / Model / Nr rej
 function assembleSubjectString() {
     let type = document.getElementById('p_type').value;
     if(type === 'Komunikacja') {
@@ -882,7 +1080,6 @@ function assembleSubjectString() {
     }
 }
 
-// Krok 4 - Dodawanie ryzyk (Odblokowane!)
 function updateRiskDatalist() {
     let ins = document.getElementById('p_insurer'); 
     let dl = document.getElementById('riskDatalist'); 
@@ -898,7 +1095,16 @@ function checkRiskDictForAutoFill() {
     let ins = document.getElementById('p_insurer').value; 
     let riskName = document.getElementById('p_riskNameInput').value.trim().toUpperCase();
     let rule = commDictList.find(r => r.insurer === ins && r.risk === riskName);
-    if(rule) document.getElementById('p_riskPctInput').value = rule.pct;
+    if(rule) {
+        document.getElementById('p_riskPctInput').value = rule.pct;
+    }
+}
+
+// Oznaczenie, że agent wpisał prowizję z ręki (nadrzędna nad automatem)
+function markCommissionAsManual() {
+    isManualCommission = true;
+    let badge = document.getElementById('p_commManualBadge');
+    if(badge) badge.classList.remove('hidden');
 }
 
 function addRiskToTemp() {
@@ -907,17 +1113,25 @@ function addRiskToTemp() {
     let pctEl = document.getElementById('p_riskPctInput');
 
     let name = nameEl.value.trim().toUpperCase();
-    let prem = parseFloat(premEl.value.replace(',', '.'));
-    let pct = parseFloat(pctEl.value.replace(',', '.'));
+    let prem = parseFloat(String(premEl.value).replace(',', '.'));
+    let pct = parseFloat(String(pctEl.value).replace(',', '.'));
 
-    if(!name) return alert("Wpisz nazwę ryzyka (np. OC, AC, Majątek)!");
-    if(isNaN(prem) || prem < 0) return alert("Wpisz poprawną kwotę składki (PLN)!");
+    if(!name) return alert("Wpisz nazwę ryzyka!");
+    if(isNaN(prem) || prem < 0) return alert("Wpisz poprawną składkę!");
     
-    // Jeśli agent nie wpisał % prowizji, sprawdź słownik lub przyjmij 0% (nie blokuj!)
-    if(isNaN(pct)) {
-        let ins = document.getElementById('p_insurer').value;
-        let rule = commDictList.find(r => r.insurer === ins && r.risk === name);
-        pct = rule ? parseFloat(rule.pct) : 0;
+    let ins = document.getElementById('p_insurer').value;
+    let existingRuleIdx = commDictList.findIndex(r => r.insurer === ins && r.risk === name);
+
+    if(!isNaN(pct)) {
+        // Jeśli agent podał stawkę %, zapisz/zaktualizuj ją automatycznie w słowniku dla tego TU!
+        if(existingRuleIdx >= 0) {
+            commDictList[existingRuleIdx].pct = pct;
+        } else {
+            commDictList.push({ id: Date.now(), insurer: ins, risk: name, pct: pct });
+        }
+        renderCommissionDict();
+    } else {
+        pct = existingRuleIdx >= 0 ? parseFloat(commDictList[existingRuleIdx].pct) : 10;
     }
 
     let comm = prem * (pct / 100);
@@ -937,7 +1151,7 @@ function addRiskToTemp() {
 }
 
 function deleteTempRisk(id) {
-    tempPolicyRisks = tempPolicyRisks.filter(r => r.id !== id);
+    tempPolicyRisks = tempPolicyRisks.filter(r => String(r.id) !== String(id));
     renderTempRisks();
 }
 
@@ -945,8 +1159,7 @@ function renderTempRisks() {
     let box = document.getElementById('p_tempRisksList');
     if(!box) return;
     box.innerHTML = "";
-    let totalPrem = 0;
-    let totalComm = 0;
+    let totalPrem = 0, totalComm = 0;
 
     tempPolicyRisks.forEach(r => {
         totalPrem += Number(r.premium) || 0;
@@ -958,12 +1171,17 @@ function renderTempRisks() {
                     <span class="text-textMuted font-semibold">${formatPLN(r.premium)}</span>
                     <span class="text-goldAccent font-bold bg-amber-50 px-1.5 py-0.5 rounded">${r.pct}% (${formatPLN(r.comm)})</span>
                 </div>
-                <button type="button" onclick="deleteTempRisk(${r.id})" class="text-red-500 font-bold hover:text-red-700 px-1 text-sm">&times;</button>
+                <button type="button" onclick="deleteTempRisk('${r.id}')" class="text-red-500 font-bold hover:text-red-700 px-1 text-sm">&times;</button>
             </div>`;
     });
 
-    document.getElementById('p_premium').value = totalPrem.toFixed(2);
-    document.getElementById('p_commValue').value = totalComm.toFixed(2);
+    if(tempPolicyRisks.length > 0) {
+        document.getElementById('p_premium').value = totalPrem.toFixed(2);
+        // Nadpisuj pole prowizji automatem TYLKO wtedy, gdy agent nie wpisał wcześniej własnej kwoty z ręki
+        if(!isManualCommission) {
+            document.getElementById('p_commValue').value = totalComm.toFixed(2);
+        }
+    }
     calcInstallmentsOnly();
 }
 
@@ -985,14 +1203,16 @@ function calcInstallmentsOnly(existingDates = null) {
             if (existingDates && existingDates[i]) {
                 dateVal = existingDates[i].date || "";
                 amtVal = existingDates[i].amount || suggestedInstAmt;
-            } else if (firstDate) {
+            } else if (firstDate && firstDate.length === 10) {
                 if(installments === 2 && i === 2) dateVal = addMonthsToDate(firstDate, 6);
                 else if (installments === 4) dateVal = addMonthsToDate(firstDate, (i-1)*3);
+                else if (installments === 6) dateVal = addMonthsToDate(firstDate, (i-1)*2);
+                else if (installments === 12) dateVal = addMonthsToDate(firstDate, i-1);
             }
             list.innerHTML += `
                 <div class="flex items-center gap-2">
-                    <span class="text-xs font-semibold text-textMuted w-14">Rata ${i}:</span>
-                    <input type="date" id="p_instDate_${i}" value="${dateVal}" class="flex-grow border border-amber-300 p-1.5 rounded-lg text-xs bg-white">
+                    <span class="text-xs font-semibold text-textMuted w-16">Rata ${i}:</span>
+                    <input type="date" id="p_instDate_${i}" min="1900-01-01" max="2100-12-31" value="${dateVal}" class="flex-grow border border-amber-300 p-1.5 rounded-lg text-xs bg-white">
                     <input type="number" id="p_instAmt_${i}" value="${amtVal}" step="0.01" class="w-28 border border-amber-300 p-1.5 rounded-lg text-xs font-bold text-right bg-white">
                 </div>`;
         }
@@ -1009,7 +1229,10 @@ function policyStep(direction) {
     currentPolicyStep += direction; 
     updatePolicyUI(); 
     if(currentPolicyStep === 2) updateRiskDatalist(); 
-    if(currentPolicyStep === 3) handlePolicyTypeChange();
+    if(currentPolicyStep === 3) {
+        handlePolicyTypeChange();
+        populateGarageSelectForPolicy();
+    }
 }
 
 function updatePolicyUI() {
@@ -1031,7 +1254,6 @@ function updatePolicyUI() {
 }
 
 function savePolicy() {
-    // Jeżeli użytkownik wpisał dane ryzyka w pola, ale zapomniał kliknąć "+ Dodaj", dodaj je automatycznie
     let pendingRiskName = document.getElementById('p_riskNameInput').value.trim();
     let pendingRiskPrem = parseFloat(document.getElementById('p_riskPremInput').value);
     if(pendingRiskName && !isNaN(pendingRiskPrem)) {
@@ -1042,25 +1264,32 @@ function savePolicy() {
     let carBrand = document.getElementById('p_carBrand').value.trim();
     let carModel = document.getElementById('p_carModel').value.trim();
     let carPlate = document.getElementById('p_carPlate').value.trim().toUpperCase();
+    let carVin = document.getElementById('p_carVin') ? document.getElementById('p_carVin').value.trim().toUpperCase() : "";
 
     if(type === 'Komunikacja') {
         assembleSubjectString();
         if(carBrand) rememberBrand(carBrand);
-        // Jeśli klient nie ma jeszcze tego auta w garażu, dopisz je automatycznie
         if(selectedClientIdForPolicy && carBrand && carPlate) {
-            let hasCar = vehiclesList.some(v => v.clientId === selectedClientIdForPolicy && v.plate === carPlate);
-            if(!hasCar) {
+            let existingCar = vehiclesList.find(v => String(v.clientId) === String(selectedClientIdForPolicy) && v.plate === carPlate);
+            if(!existingCar) {
                 vehiclesList.push({
                     id: Date.now() + 1,
                     clientId: selectedClientIdForPolicy,
                     brand: carBrand,
                     model: carModel,
                     year: "",
+                    cap: "",
+                    kw: "",
+                    km: "",
+                    mileage: "",
                     plate: carPlate,
-                    vin: "",
+                    vin: carVin,
+                    firstReg: "",
                     inspection: "",
                     anglik: false
                 });
+            } else if(carVin && !existingCar.vin) {
+                existingCar.vin = carVin;
             }
         }
     }
@@ -1072,20 +1301,24 @@ function savePolicy() {
     let instCount = parseInt(document.getElementById('p_installments').value) || 1; 
     let instDates = {};
     
+    let existingPolicy = editingPolicyId ? policiesList.find(x => String(x.id) === String(editingPolicyId)) : null;
+
     if (instCount > 1) {
         for(let i = 2; i <= instCount; i++) {
             let dInput = document.getElementById(`p_instDate_${i}`); 
             let aInput = document.getElementById(`p_instAmt_${i}`); 
             let existingPaid = false;
-            if(editingPolicyId) { 
-                let existingP = policiesList.find(x => x.id === editingPolicyId); 
-                if(existingP && existingP.installmentDates && existingP.installmentDates[i]) {
-                    existingPaid = existingP.installmentDates[i].paid || false; 
-                }
+            if(existingPolicy && existingPolicy.installmentDates && existingPolicy.installmentDates[i]) {
+                existingPaid = existingPolicy.installmentDates[i].paid || false; 
             }
             if(dInput && aInput) instDates[i] = { date: dInput.value, amount: aInput.value, paid: existingPaid };
         }
     }
+
+    // Pobranie ostatecznych kwot (ręczna prowizja z pola ma absolutny priorytet!)
+    let finalPremium = parseFloat(String(document.getElementById('p_premium').value).replace(',', '.')) || 0;
+    let finalComm = parseFloat(String(document.getElementById('p_commValue').value).replace(',', '.')) || 0;
+    let commNote = document.getElementById('p_commNote') ? document.getElementById('p_commNote').value.trim() : "";
 
     let pData = { 
         id: editingPolicyId || Date.now(), 
@@ -1096,12 +1329,15 @@ function savePolicy() {
         number: document.getElementById('p_number').value.trim(), 
         dateStart: document.getElementById('p_dateStart').value, 
         dateEnd: document.getElementById('p_dateEnd').value, 
-        premium: document.getElementById('p_premium').value || 0, 
+        premium: finalPremium, 
         installments: instCount, 
         firstPaymentDate: document.getElementById('p_firstPaymentDate').value, 
         installmentDates: instDates, 
-        firstPaymentPaid: editingPolicyId ? (policiesList.find(x => x.id === editingPolicyId)?.firstPaymentPaid || false) : false, 
-        commissionAmt: document.getElementById('p_commValue').value || 0, 
+        firstPaymentPaid: existingPolicy ? (existingPolicy.firstPaymentPaid || false) : false, 
+        settlementStatus: existingPolicy ? (existingPolicy.settlementStatus || "nierozliczona") : "nierozliczona",
+        commissionAmt: finalComm, 
+        isManualComm: isManualCommission,
+        commNote: commNote,
         subject: subjectStr, 
         carBrand: carBrand,
         carModel: carModel,
@@ -1109,30 +1345,78 @@ function savePolicy() {
         risks: tempPolicyRisks, 
         reqAc: reqAc, 
         reqOc: reqOc, 
-        acDone: editingPolicyId ? (policiesList.find(x=>x.id===editingPolicyId)?.acDone || false) : false, 
-        ocDone: editingPolicyId ? (policiesList.find(x=>x.id===editingPolicyId)?.ocDone || false) : false,
-        renewalStatus: editingPolicyId ? (policiesList.find(x => x.id === editingPolicyId)?.renewalStatus || "todo") : "todo" 
+        acDone: existingPolicy ? (existingPolicy.acDone || false) : false, 
+        ocDone: existingPolicy ? (existingPolicy.ocDone || false) : false,
+        renewalStatus: existingPolicy ? (existingPolicy.renewalStatus || "todo") : "todo" 
     };
 
     if(editingPolicyId) { 
-        let idx = policiesList.findIndex(x => x.id === editingPolicyId); 
+        let idx = policiesList.findIndex(x => String(x.id) === String(editingPolicyId)); 
         policiesList[idx] = pData; 
     } else { 
         policiesList.push(pData); 
     }
     syncAndRender(); 
     closePolicyModal(); 
-    if(currentOpenId === selectedClientIdForPolicy && !document.getElementById('clientFullModalOverlay').classList.contains('hidden')) {
-        openClientFull(currentOpenId); 
+    if(String(currentOpenId) === String(selectedClientIdForPolicy) && !document.getElementById('clientFullModalOverlay').classList.contains('hidden')) {
+        populateClientFull(currentOpenId); 
     }
+}
+
+// Bezpośredni zapis ręcznej korekty prowizji i notatki w szufladzie polisy
+function saveDrawerCommissionOverride() {
+    if(!currentOpenPolicyId) return;
+    let p = policiesList.find(x => String(x.id) === String(currentOpenPolicyId));
+    if(!p) return;
+
+    let newComm = parseFloat(String(document.getElementById('pd_commInput').value).replace(',', '.'));
+    let newNote = document.getElementById('pd_commNoteInput').value.trim();
+
+    if(!isNaN(newComm) && newComm >= 0) {
+        p.commissionAmt = newComm;
+        p.isManualComm = true;
+    }
+    p.commNote = newNote;
+    syncAndRender();
+
+    let toast = document.getElementById('copyToast');
+    if(toast) {
+        toast.innerText = `💰 Zaktualizowano prowizję do statystyk: ${formatPLN(p.commissionAmt)}`;
+        toast.classList.remove('hidden');
+        setTimeout(() => toast.classList.add('hidden'), 2200);
+    }
+}
+
+function updatePolicySettlement(statusVal) {
+    if(!currentOpenPolicyId) return;
+    let p = policiesList.find(x => String(x.id) === String(currentOpenPolicyId));
+    if(p) {
+        p.settlementStatus = statusVal;
+        syncAndRender();
+        populateDrawer('policy', p.id);
+    }
+}
+
+function getFirstInstallmentAmount(p) {
+    let totalPrem = parseFloat(p.premium) || 0;
+    if(!p.installments || p.installments <= 1) return totalPrem;
+    if(p.installmentDates) {
+        let sumOthers = 0;
+        for(let i = 2; i <= p.installments; i++) {
+            if(p.installmentDates[i]) sumOthers += parseFloat(p.installmentDates[i].amount) || 0;
+        }
+        let firstAmt = totalPrem - sumOthers;
+        if(firstAmt > 0) return firstAmt;
+    }
+    return totalPrem / p.installments;
 }
 
 function populateDrawer(type, id) {
     if (type === 'policy') {
-        const p = policiesList.find(x => x.id === id); 
+        const p = policiesList.find(x => String(x.id) === String(id)); 
         if(!p) return; 
-        currentOpenPolicyId = id; 
-        const c = clientsList.find(x => x.id === p.clientId);
+        currentOpenPolicyId = p.id; 
+        const c = clientsList.find(x => String(x.id) === String(p.clientId));
         
         document.getElementById('pd_insurer').innerText = p.insurer + (p.salesType === 'renewal' ? " (Wznowienie)" : " (Nowa)"); 
         document.getElementById('pd_type').innerText = p.type; 
@@ -1145,9 +1429,14 @@ function populateDrawer(type, id) {
         document.getElementById('pd_subject').innerText = p.subject || "-"; 
         document.getElementById('pd_start').innerText = p.dateStart || "-"; 
         document.getElementById('pd_end').innerText = p.dateEnd || "-";
-        document.getElementById('pd_premium').innerText = formatPLN(p.premium) + (p.installments > 1 ? ` (${p.installments} raty)` : ""); 
-        document.getElementById('pd_comm').innerText = formatPLN(p.commissionAmt);
+        document.getElementById('pd_premium').innerText = formatPLN(p.premium) + (p.installments > 1 ? ` (${p.installments} rat)` : ""); 
         
+        document.getElementById('pd_commInput').value = Number(p.commissionAmt || 0).toFixed(2);
+        document.getElementById('pd_commNoteInput').value = p.commNote || "";
+        
+        let setSelect = document.getElementById('pd_settlementStatus');
+        if(setSelect) setSelect.value = p.settlementStatus || "nierozliczona";
+
         let rList = document.getElementById('pd_risksList'); 
         rList.innerHTML = ""; 
         if(p.risks && p.risks.length > 0) { 
@@ -1155,7 +1444,7 @@ function populateDrawer(type, id) {
                 rList.innerHTML += `<div class="flex justify-between border-b border-gray-200 pb-1"><span>${r.name}</span> <span class="font-bold text-goldAccent">${formatPLN(r.premium)} (${r.pct}%)</span></div>`; 
             }); 
         } else { 
-            rList.innerHTML = "<p class='text-xs text-textMuted'>Brak szczegółowych ryzyk.</p>"; 
+            rList.innerHTML = "<p class='text-xs text-textMuted'>Brak rozbicia na ryzyka (wpisano kwotę łączną).</p>"; 
         }
         
         let instBox = document.getElementById('pd_installmentsBox'); 
@@ -1163,13 +1452,36 @@ function populateDrawer(type, id) {
         instList.innerHTML = '';
         if (p.installments > 1 || p.firstPaymentDate) {
             instBox.classList.remove('hidden'); 
-            let firstAmt = p.installments > 1 && p.installmentDates && p.installmentDates[2] ? p.installmentDates[2].amount : p.premium;
-            instList.innerHTML += `<div class="flex justify-between items-center border-b border-amber-200/60 pb-1 mt-1"><div class="flex items-center"><input type="checkbox" ${p.firstPaymentPaid ? 'checked' : ''} onchange="toggleInstPaid(${p.id}, 1)" class="w-4 h-4 accent-green-600 cursor-pointer"><span class="text-textDark font-semibold ml-2">${p.installments > 1 ? 'Rata I:' : 'Całość:'}</span></div><div class="text-right"><span class="block font-bold ${p.firstPaymentPaid ? 'text-green-600' : 'text-textDark'}">${p.firstPaymentDate || "-"} <span class="text-xs font-normal text-textMuted">(${formatPLN(firstAmt)})</span></span></div></div>`;
+            let firstAmt = getFirstInstallmentAmount(p);
+            let isCanceled = (p.settlementStatus === 'anulowana');
+            let firstStatusLabel = (!p.firstPaymentPaid && isCanceled) ? `<span class="text-[10px] text-red-600 font-bold ml-1">(Anulowana - sprzedaż)</span>` : '';
+
+            instList.innerHTML += `
+                <div class="flex justify-between items-center border-b border-amber-200/60 pb-1 mt-1">
+                    <div class="flex items-center">
+                        <input type="checkbox" ${p.firstPaymentPaid ? 'checked' : ''} onchange="toggleInstPaid('${p.id}', 1)" class="w-4 h-4 accent-green-600 cursor-pointer">
+                        <span class="text-textDark font-semibold ml-2">${p.installments > 1 ? 'Rata I:' : 'Całość:'} ${firstStatusLabel}</span>
+                    </div>
+                    <div class="text-right">
+                        <span class="block font-bold ${p.firstPaymentPaid ? 'text-green-600' : (isCanceled ? 'line-through text-gray-400' : 'text-textDark')}">${p.firstPaymentDate || "-"} <span class="text-xs font-normal text-textMuted">(${formatPLN(firstAmt)})</span></span>
+                    </div>
+                </div>`;
+            
             if(p.installments > 1 && p.installmentDates) { 
                 for(let i=2; i<=p.installments; i++) { 
                     let dInfo = p.installmentDates[i]; 
                     if(dInfo) {
-                        instList.innerHTML += `<div class="flex justify-between items-center border-b border-amber-200/60 pb-1 mt-2"><div class="flex items-center"><input type="checkbox" ${dInfo.paid ? 'checked' : ''} onchange="toggleInstPaid(${p.id}, ${i})" class="w-4 h-4 accent-green-600 cursor-pointer"><span class="text-textDark font-semibold ml-2">Rata ${i}:</span></div><div class="text-right"><span class="block font-bold ${dInfo.paid ? 'text-green-600' : 'text-textDark'}">${dInfo.date || "-"} <span class="text-xs font-normal text-textMuted">(${formatPLN(dInfo.amount)})</span></span></div></div>`; 
+                        let statusLbl = (!dInfo.paid && isCanceled) ? `<span class="text-[10px] text-red-600 font-bold ml-1">(Wygasła po sprzedaży)</span>` : '';
+                        instList.innerHTML += `
+                            <div class="flex justify-between items-center border-b border-amber-200/60 pb-1 mt-2">
+                                <div class="flex items-center">
+                                    <input type="checkbox" ${dInfo.paid ? 'checked' : ''} onchange="toggleInstPaid('${p.id}', ${i})" class="w-4 h-4 accent-green-600 cursor-pointer">
+                                    <span class="text-textDark font-semibold ml-2">Rata ${i}: ${statusLbl}</span>
+                                </div>
+                                <div class="text-right">
+                                    <span class="block font-bold ${dInfo.paid ? 'text-green-600' : (isCanceled ? 'line-through text-gray-400' : 'text-textDark')}">${dInfo.date || "-"} <span class="text-xs font-normal text-textMuted">(${formatPLN(dInfo.amount)})</span></span>
+                                </div>
+                            </div>`; 
                     }
                 } 
             }
@@ -1190,16 +1502,16 @@ function populateDrawer(type, id) {
 }
 
 function toggleInstPaid(id, idx) { 
-    let p = policiesList.find(x => x.id === id); 
+    let p = policiesList.find(x => String(x.id) === String(id)); 
     if(!p) return; 
     if(idx === 1) p.firstPaymentPaid = !p.firstPaymentPaid; 
     else if(p.installmentDates && p.installmentDates[idx]) p.installmentDates[idx].paid = !p.installmentDates[idx].paid; 
     syncAndRender(); 
-    openDrawer('policy', id); 
+    populateDrawer('policy', p.id); 
 }
 
 function togglePolicyTask(taskType) {
-    let p = policiesList.find(x => x.id === currentOpenPolicyId); 
+    let p = policiesList.find(x => String(x.id) === String(currentOpenPolicyId)); 
     if(!p) return;
     if(taskType === 'ac') p.acDone = document.getElementById('pd_taskAc').checked;
     if(taskType === 'oc') p.ocDone = document.getElementById('pd_taskOc').checked;
@@ -1208,18 +1520,18 @@ function togglePolicyTask(taskType) {
 
 function deletePolicy(id) { 
     if(confirm("Usunąć polisę na stałe?")) { 
-        policiesList = policiesList.filter(p => p.id !== id); 
+        policiesList = policiesList.filter(p => String(p.id) !== String(id)); 
         closeDrawer('policy'); 
         syncAndRender(); 
         if(currentOpenId && !document.getElementById('clientFullModalOverlay').classList.contains('hidden')) {
-            openClientFull(currentOpenId); 
+            populateClientFull(currentOpenId); 
         }
     } 
 }
 
 function clonePolicyToRenewal() {
     if(!currentOpenPolicyId) return;
-    let p = policiesList.find(x => x.id === currentOpenPolicyId); 
+    let p = policiesList.find(x => String(x.id) === String(currentOpenPolicyId)); 
     if(!p) return;
     closeDrawer('policy');
     openPolicyModal(null, p.clientId);
@@ -1252,15 +1564,15 @@ function renderOffersList() {
         return;
     }
     offersList.forEach(o => {
-        let c = clientsList.find(x => x.id == o.clientId);
+        let c = clientsList.find(x => String(x.id) === String(o.clientId));
         tbody.innerHTML += `
             <tr class="hover:bg-luxBg/60 transition-all border-l-4 border-transparent hover:border-indigo-500">
                 <td class="p-4 text-xs font-bold">${o.date}</td>
-                <td class="p-4 font-semibold cursor-pointer hover:underline" onclick="if(${o.clientId}) openClientFull(${o.clientId})">${c ? c.name : "Nieznany"}</td>
+                <td class="p-4 font-semibold cursor-pointer hover:underline" onclick="if('${o.clientId}') openClientFull('${o.clientId}')">${c ? c.name : "Nieznany"}</td>
                 <td class="p-4 text-xs"><span class="font-bold text-indigo-700 block">${o.type}</span><span class="text-textMuted">${o.subject}</span></td>
                 <td class="p-4 text-right">
-                    <button onclick="openOfferModal(${o.id})" class="text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1.5 rounded hover:bg-blue-100 mr-1">Edytuj / PDF</button>
-                    <button onclick="deleteOffer(${o.id})" class="text-xs font-bold text-red-600 bg-red-50 px-3 py-1.5 rounded hover:bg-red-100">Usuń</button>
+                    <button onclick="openOfferModal('${o.id}')" class="text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1.5 rounded hover:bg-blue-100 mr-1">Edytuj / PDF</button>
+                    <button onclick="deleteOffer('${o.id}')" class="text-xs font-bold text-red-600 bg-red-50 px-3 py-1.5 rounded hover:bg-red-100">Usuń</button>
                 </td>
             </tr>`;
     });
@@ -1280,7 +1592,7 @@ function populateOfferModal(offerId = null, prefillClientId = null) {
     });
 
     if(offerId) {
-        let o = offersList.find(x => x.id == offerId);
+        let o = offersList.find(x => String(x.id) === String(offerId));
         if(o) { 
             clientSel.value = o.clientId || ""; 
             document.getElementById('off_typeSelect').value = o.type; 
@@ -1301,7 +1613,7 @@ function populateOfferModal(offerId = null, prefillClientId = null) {
 
 function updateOfferClientName() {
     let cid = document.getElementById('off_clientSelect').value;
-    let c = clientsList.find(x => x.id == cid);
+    let c = clientsList.find(x => String(x.id) === String(cid));
     document.getElementById('pdfClientName').innerText = c ? c.name : "Klient";
 }
 
@@ -1332,7 +1644,7 @@ function convertToPolicy(idx) {
     if(!cid) return alert("Najpierw wybierz klienta u góry oferty!");
     let subj = document.getElementById('off_subjectInput').value;
     closeOfferModal(); 
-    openPolicyModal(null, parseInt(cid));
+    openPolicyModal(null, cid);
     
     document.getElementById('p_insurer').value = row.tu; 
     document.getElementById('p_homeAddress').value = subj;
@@ -1353,8 +1665,8 @@ function copyAIPrompt() {
     tempOfferRows.forEach((r, i) => { 
         prompt += `Wariant ${i+1}: TU ${r.tu}, Składka roczna: ${r.prem} PLN. Zakres: ${r.risks}\n`; 
     });
-    prompt += `\nNapisz krótką, profesjonalną rekomendację (3-4 zdania), sugerując optymalny wybór z punktu widzenia stosunku ceny do zakresu. Zwracaj się bezpośrednio do klienta, bez używania imion (zgodnie z RODO).`;
-    navigator.clipboard.writeText(prompt).then(() => alert("Skopiowano bezpieczny prompt (bez danych RODO) do schowka!"));
+    prompt += `\nNapisz krótką, profesjonalną rekomendację (3-4 zdania), sugerując optymalny wybór z punktu widzenia stosunku ceny do zakresu. Zwracaj się bezpośrednio do klienta, bez używania imion.`;
+    copyToClipboard(prompt, "Prompt AI");
 }
 
 function renderOfferTable() {
@@ -1383,7 +1695,7 @@ function renderOfferTable() {
 }
 
 function saveOffer() {
-    let cid = parseInt(document.getElementById('off_clientSelect').value); 
+    let cid = document.getElementById('off_clientSelect').value; 
     if(!cid) return alert("Wybierz klienta!");
     let subj = document.getElementById('off_subjectInput').value.trim() || "Przedmiot"; 
     let typeVal = document.getElementById('off_typeSelect').value;
@@ -1398,7 +1710,7 @@ function saveOffer() {
         rows: JSON.parse(JSON.stringify(tempOfferRows)) 
     };
     if(editingOfferId) { 
-        let idx = offersList.findIndex(x => x.id == editingOfferId); 
+        let idx = offersList.findIndex(x => String(x.id) === String(editingOfferId)); 
         offersList[idx] = oData; 
     } else { 
         offersList.push(oData); 
@@ -1409,7 +1721,7 @@ function saveOffer() {
 
 function deleteOffer(id) { 
     if(confirm("Usunąć ofertę?")) { 
-        offersList = offersList.filter(o => o.id != id); 
+        offersList = offersList.filter(o => String(o.id) !== String(id)); 
         syncAndRender(); 
     } 
 }
@@ -1417,7 +1729,7 @@ function deleteOffer(id) {
 function generatePDF() {
     if(tempOfferRows.length === 0) return alert("Brak wariantów w tabeli!");
     let cid = document.getElementById('off_clientSelect').value; 
-    let c = clientsList.find(x => x.id == cid);
+    let c = clientsList.find(x => String(x.id) === String(cid));
     document.getElementById('pdfClientName').innerText = c ? c.name : "Klient"; 
     document.getElementById('pdfSubject').innerText = document.getElementById('off_subjectInput').value || "-"; 
     document.getElementById('pdfCalcDate').innerText = new Date().toLocaleDateString('pl-PL');
@@ -1448,9 +1760,9 @@ function generatePDF() {
     });
 }
 
-// ================= 9. DASHBOARD I FINANSE =================
+// ================= 9. DASHBOARD, FINANSE I EKSPORT CSV =================
 function updateKanbanStatus(policyId, status) { 
-    let p = policiesList.find(x => x.id === policyId); 
+    let p = policiesList.find(x => String(x.id) === String(policyId)); 
     if(p) { 
         p.renewalStatus = status; 
         syncAndRender(); 
@@ -1469,7 +1781,7 @@ function renderDashboard() {
             let bDate = new Date(c.birth); 
             if((bDate.getMonth() + 1) === currentMonth) { 
                 let age = today.getFullYear() - bDate.getFullYear(); 
-                birthdaysHtml += `<div class="px-3 py-1.5 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800 font-semibold cursor-pointer" onclick="openClientFull(${c.id})">🎈 ${c.name} (${age} l.) - ${String(bDate.getDate()).padStart(2, '0')}.${String(currentMonth).padStart(2, '0')}</div>`; 
+                birthdaysHtml += `<div class="px-3 py-1.5 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800 font-semibold cursor-pointer" onclick="openClientFull('${c.id}')">🎈 ${c.name} (${age} l.) - ${String(bDate.getDate()).padStart(2, '0')}.${String(currentMonth).padStart(2, '0')}</div>`; 
             } 
         } 
     });
@@ -1479,7 +1791,7 @@ function renderDashboard() {
             let insp = new Date(v.inspection); 
             let diffDays = Math.ceil((insp - today) / (1000 * 60 * 60 * 24));
             if(diffDays >= 0 && diffDays <= 30) {
-                birthdaysHtml += `<div class="w-full flex justify-between items-center bg-gray-50 border border-gray-200 p-2 rounded text-xs cursor-pointer" onclick="openClientFull(${v.clientId})"><span class="font-bold text-gray-700">🔧 Przegląd: ${v.plate}</span><span class="text-amber-600 font-bold">za ${diffDays} dni</span></div>`;
+                birthdaysHtml += `<div class="w-full flex justify-between items-center bg-gray-50 border border-gray-200 p-2 rounded text-xs cursor-pointer" onclick="openClientFull('${v.clientId}')"><span class="font-bold text-gray-700">🔧 Przegląd: ${v.plate}</span><span class="text-amber-600 font-bold">za ${diffDays} dni</span></div>`;
             }
         }
     });
@@ -1489,42 +1801,52 @@ function renderDashboard() {
             let eEnd = new Date(ep.dateEnd); 
             let diffDays = Math.ceil((eEnd - today) / (1000 * 60 * 60 * 24));
             if(diffDays >= 0 && diffDays <= 45) {
-                let c = clientsList.find(x => x.id === ep.clientId);
+                let c = clientsList.find(x => String(x.id) === String(ep.clientId));
                 if(c) {
-                    thirtyDaysHtml += `<div class="flex justify-between items-center bg-green-50 p-3 rounded-xl border border-green-200"><div><span class="font-bold cursor-pointer hover:underline text-green-900" onclick="openClientFull(${c.id})">${c.name}</span> <span class="text-xs text-green-700 font-bold">(OBCA: ${ep.subject})</span></div><div class="text-right"><span class="text-xs font-bold text-green-700">Przejęcie za ${diffDays} dni!</span></div></div>`;
+                    thirtyDaysHtml += `<div class="flex justify-between items-center bg-green-50 p-3 rounded-xl border border-green-200"><div><span class="font-bold cursor-pointer hover:underline text-green-900" onclick="openClientFull('${c.id}')">${c.name}</span> <span class="text-xs text-green-700 font-bold">(OBCA: ${ep.subject})</span></div><div class="text-right"><span class="text-xs font-bold text-green-700">Przejęcie za ${diffDays} dni!</span></div></div>`;
                 }
             }
         }
     });
 
     policiesList.forEach(p => {
-        let c = clientsList.find(x => x.id === p.clientId); 
+        let c = clientsList.find(x => String(x.id) === String(p.clientId)); 
         if(!c) return;
+        let isCanceled = (p.settlementStatus === 'anulowana');
+
         if(p.dateStart && new Date(p.dateStart).getMonth() + 1 === currentMonth && new Date(p.dateStart).getFullYear() === today.getFullYear()) { 
-            monthPrem += parseFloat(p.premium) || 0; 
-            monthComm += parseFloat(p.commissionAmt) || 0; 
-            countPolicies++; 
+            if(!isCanceled) {
+                monthPrem += parseFloat(p.premium) || 0; 
+                monthComm += parseFloat(p.commissionAmt) || 0; 
+                countPolicies++; 
+            } else if(p.firstPaymentPaid) {
+                // Jeśli polisa została wypowiedziana po opłaceniu I raty, dolicz tylko faktycznie opłaconą część
+                let numInst = p.installments || 1;
+                monthPrem += getFirstInstallmentAmount(p);
+                monthComm += (parseFloat(p.commissionAmt) || 0) / numInst;
+                countPolicies++;
+            }
         }
         
-        if(p.reqAc && !p.acDone) { 
-            overdueHtml += `<div class="flex justify-between items-center bg-red-50 p-2 rounded-lg border border-red-200"><div><span class="font-bold text-red-800 cursor-pointer hover:underline" onclick="openDrawer('policy', ${p.id})">${c.name}</span><p class="text-xs text-red-600 font-bold">📸 Brak zdjęć do AC (${p.subject})!</p></div></div>`; 
+        if(p.reqAc && !p.acDone && !isCanceled) { 
+            overdueHtml += `<div class="flex justify-between items-center bg-red-50 p-2 rounded-lg border border-red-200"><div><span class="font-bold text-red-800 cursor-pointer hover:underline" onclick="openDrawer('policy', '${p.id}')">${c.name}</span><p class="text-xs text-red-600 font-bold">📸 Brak zdjęć do AC (${p.subject})!</p></div></div>`; 
         }
-        if(p.reqOc && !p.ocDone) { 
-            overdueHtml += `<div class="flex justify-between items-center bg-red-50 p-2 rounded-lg border border-red-200"><div><span class="font-bold text-red-800 cursor-pointer hover:underline" onclick="openDrawer('policy', ${p.id})">${c.name}</span><p class="text-xs text-red-600 font-bold">✉️ Nie wysłano wypowiedzenia OC!</p></div></div>`; 
+        if(p.reqOc && !p.ocDone && !isCanceled) { 
+            overdueHtml += `<div class="flex justify-between items-center bg-red-50 p-2 rounded-lg border border-red-200"><div><span class="font-bold text-red-800 cursor-pointer hover:underline" onclick="openDrawer('policy', '${p.id}')">${c.name}</span><p class="text-xs text-red-600 font-bold">✉️ Nie wysłano wypowiedzenia OC!</p></div></div>`; 
         }
 
-        if(p.dateEnd) {
+        if(p.dateEnd && !isCanceled) {
             let dEnd = new Date(p.dateEnd); 
             let diffDays = Math.ceil((dEnd - today) / (1000 * 60 * 60 * 24));
             if(diffDays >= 0 && diffDays <= 30) { 
-                thirtyDaysHtml += `<div class="flex justify-between items-center bg-luxBg p-3 rounded-xl border border-luxBorder"><div><span class="font-bold cursor-pointer hover:underline" onclick="openClientFull(${c.id})">${c.name}</span> <span class="text-xs text-textMuted">(${p.insurer} - ${p.subject || ''})</span></div><div class="text-right"><span class="text-xs font-bold text-amber-600 bg-amber-100 px-2 py-0.5 rounded">Za ${diffDays} dni (${p.dateEnd})</span></div></div>`; 
+                thirtyDaysHtml += `<div class="flex justify-between items-center bg-luxBg p-3 rounded-xl border border-luxBorder"><div><span class="font-bold cursor-pointer hover:underline" onclick="openClientFull('${c.id}')">${c.name}</span> <span class="text-xs text-textMuted">(${p.insurer} - ${p.subject || ''})</span></div><div class="text-right"><span class="text-xs font-bold text-amber-600 bg-amber-100 px-2 py-0.5 rounded">Za ${diffDays} dni (${p.dateEnd})</span></div></div>`; 
             }
             if(diffDays >= 0 && diffDays <= 45) { 
                 let bColor = diffDays < 10 ? 'text-red-600' : 'text-amber-600'; 
                 let actions = '';
-                if(p.renewalStatus === 'todo' || !p.renewalStatus) actions = `<button onclick="updateKanbanStatus(${p.id}, 'offer')" class="text-[10px] bg-blue-100 text-blue-800 px-2 py-1 rounded font-bold">Wyślij ofertę ➔</button>`;
-                if(p.renewalStatus === 'offer') actions = `<button onclick="updateKanbanStatus(${p.id}, 'won')" class="text-[10px] bg-green-100 text-green-800 px-2 py-1 rounded mr-1 font-bold">✅ Sukces</button> <button onclick="updateKanbanStatus(${p.id}, 'lost')" class="text-[10px] bg-red-100 text-red-800 px-2 py-1 rounded font-bold">❌ Porażka</button>`;
-                let card = `<div class="bg-white p-3 rounded-lg shadow-sm border border-luxBorder relative group"><p class="font-bold text-sm text-textDark cursor-pointer hover:text-goldAccent" onclick="openClientFull(${c.id})">${c.name}</p><p class="text-xs text-textMuted">${p.insurer} | ${p.subject || ''}</p><div class="flex justify-between items-center mt-2"><span class="text-[10px] font-bold ${bColor}">Koniec: ${p.dateEnd}</span></div><div class="mt-3 flex justify-end border-t pt-2">${actions}</div></div>`;
+                if(p.renewalStatus === 'todo' || !p.renewalStatus) actions = `<button onclick="updateKanbanStatus('${p.id}', 'offer')" class="text-[10px] bg-blue-100 text-blue-800 px-2 py-1 rounded font-bold">Wyślij ofertę ➔</button>`;
+                if(p.renewalStatus === 'offer') actions = `<button onclick="updateKanbanStatus('${p.id}', 'won')" class="text-[10px] bg-green-100 text-green-800 px-2 py-1 rounded mr-1 font-bold">✅ Sukces</button> <button onclick="updateKanbanStatus('${p.id}', 'lost')" class="text-[10px] bg-red-100 text-red-800 px-2 py-1 rounded font-bold">❌ Porażka</button>`;
+                let card = `<div class="bg-white p-3 rounded-lg shadow-sm border border-luxBorder relative group"><p class="font-bold text-sm text-textDark cursor-pointer hover:text-goldAccent" onclick="openClientFull('${c.id}')">${c.name}</p><p class="text-xs text-textMuted">${p.insurer} | ${p.subject || ''}</p><div class="flex justify-between items-center mt-2"><span class="text-[10px] font-bold ${bColor}">Koniec: ${p.dateEnd}</span></div><div class="mt-3 flex justify-end border-t pt-2">${actions}</div></div>`;
                 let s = p.renewalStatus || 'todo'; 
                 if(s === 'todo') kbTodo += card; 
                 if(s === 'offer') kbOffer += card; 
@@ -1533,25 +1855,28 @@ function renderDashboard() {
             }
         }
 
-        let makeOverdueRow = (rataName, dateStr, amt) => { overdueHtml += `<div class="flex justify-between items-center bg-red-50 p-2 rounded-lg border border-red-200"><div><span class="font-bold text-red-800 cursor-pointer hover:underline" onclick="openDrawer('policy', ${p.id})">${c.name}</span><p class="text-xs text-red-600">${rataName}: <span class="font-bold">${dateStr}</span> (${formatPLN(amt)})</p></div></div>`; };
-        let makeUpcomingRow = (rataName, dateStr, amt) => { upcomingHtml += `<div class="flex justify-between items-center bg-amber-50 p-2 rounded-lg border border-amber-200"><div><span class="font-bold text-amber-900 cursor-pointer hover:underline" onclick="openDrawer('policy', ${p.id})">${c.name}</span><p class="text-xs text-amber-700">${rataName}: <span class="font-bold">${dateStr}</span> (${formatPLN(amt)})</p></div></div>`; };
-        
-        let next7Days = new Date(today); 
-        next7Days.setDate(today.getDate() + 7);
-        if(p.firstPaymentDate && !p.firstPaymentPaid) {
-            let dFP = new Date(p.firstPaymentDate); 
-            let amt = p.installments > 1 && p.installmentDates && p.installmentDates[2] ? p.installmentDates[2].amount : p.premium;
-            if(dFP < today) makeOverdueRow(p.installments > 1 ? 'I rata' : 'Całość', p.firstPaymentDate, amt);
-            else if(dFP >= today && dFP <= next7Days) makeUpcomingRow(p.installments > 1 ? 'I rata' : 'Całość', p.firstPaymentDate, amt);
-        }
-        if(p.installments > 1 && p.installmentDates) {
-            for(let i in p.installmentDates) { 
-                let inst = p.installmentDates[i]; 
-                if(inst.date && !inst.paid) { 
-                    let dInst = new Date(inst.date); 
-                    if(dInst < today) makeOverdueRow(`Rata ${i}`, inst.date, inst.amount); 
-                    else if(dInst >= today && dInst <= next7Days) makeUpcomingRow(`Rata ${i}`, inst.date, inst.amount); 
-                } 
+        // Jeżeli polisa została wypowiedziana (np. po sprzedaży auta przed II ratą), nie pokazuj kolejnych rat jako zaległych!
+        if(!isCanceled) {
+            let makeOverdueRow = (rataName, dateStr, amt) => { overdueHtml += `<div class="flex justify-between items-center bg-red-50 p-2 rounded-lg border border-red-200"><div><span class="font-bold text-red-800 cursor-pointer hover:underline" onclick="openDrawer('policy', '${p.id}')">${c.name}</span><p class="text-xs text-red-600">${rataName}: <span class="font-bold">${dateStr}</span> (${formatPLN(amt)})</p></div></div>`; };
+            let makeUpcomingRow = (rataName, dateStr, amt) => { upcomingHtml += `<div class="flex justify-between items-center bg-amber-50 p-2 rounded-lg border border-amber-200"><div><span class="font-bold text-amber-900 cursor-pointer hover:underline" onclick="openDrawer('policy', '${p.id}')">${c.name}</span><p class="text-xs text-amber-700">${rataName}: <span class="font-bold">${dateStr}</span> (${formatPLN(amt)})</p></div></div>`; };
+            
+            let next7Days = new Date(today); 
+            next7Days.setDate(today.getDate() + 7);
+            if(p.firstPaymentDate && !p.firstPaymentPaid) {
+                let dFP = new Date(p.firstPaymentDate); 
+                let amt = getFirstInstallmentAmount(p);
+                if(dFP < today) makeOverdueRow(p.installments > 1 ? 'I rata' : 'Całość', p.firstPaymentDate, amt);
+                else if(dFP >= today && dFP <= next7Days) makeUpcomingRow(p.installments > 1 ? 'I rata' : 'Całość', p.firstPaymentDate, amt);
+            }
+            if(p.installments > 1 && p.installmentDates) {
+                for(let i in p.installmentDates) { 
+                    let inst = p.installmentDates[i]; 
+                    if(inst.date && !inst.paid) { 
+                        let dInst = new Date(inst.date); 
+                        if(dInst < today) makeOverdueRow(`Rata ${i}`, inst.date, inst.amount); 
+                        else if(dInst >= today && dInst <= next7Days) makeUpcomingRow(`Rata ${i}`, inst.date, inst.amount); 
+                    } 
+                }
             }
         }
     });
@@ -1580,49 +1905,80 @@ function renderDashboard() {
 function renderFinances() {
     let yearsMap = {}; 
     let paidComm = 0, pendingComm = 0, premiumPaid = 0, premiumPending = 0; 
-    let pendingListHtml = "";
+    let listHtml = "";
+    
     let filterVal = document.getElementById('financeMonthFilter') ? document.getElementById('financeMonthFilter').value : null; 
     let fYear = filterVal ? parseInt(filterVal.split('-')[0]) : null; 
     let fMonth = filterVal ? parseInt(filterVal.split('-')[1]) : null;
+    let statusFilter = document.getElementById('financeStatusFilter') ? document.getElementById('financeStatusFilter').value : 'all';
 
     policiesList.forEach(p => {
+        let isCanceled = (p.settlementStatus === 'anulowana');
+        let pStatus = p.settlementStatus || 'nierozliczona';
+
         let y = p.dateStart ? new Date(p.dateStart).getFullYear() : null; 
-        if(y) { 
+        if(y && !isNaN(y)) { 
             if(!yearsMap[y]) yearsMap[y] = { premium: 0, commTotal: 0, commPaid: 0, commPending: 0 }; 
-            yearsMap[y].premium += parseFloat(p.premium) || 0; 
-            yearsMap[y].commTotal += parseFloat(p.commissionAmt) || 0; 
         }
-        let c = clientsList.find(x => x.id === p.clientId); 
+
+        let c = clientsList.find(x => String(x.id) === String(p.clientId)); 
         let totalComm = parseFloat(p.commissionAmt) || 0; 
         let numInst = p.installments || 1; 
         let partComm = totalComm / numInst;
         
-        let checkRata = (dateStr, amountStr, isPaid) => {
-            if(!dateStr) return; 
-            let d = new Date(dateStr); 
-            if(y) { 
+        let processInstallment = (rataLabel, dateStr, amountStr, isPaid) => {
+            // Jeśli polisa została wypowiedziana po sprzedaży auta, nieopłacone raty wygasają (nie liczą się do długu ani do prowizji!)
+            if(isCanceled && !isPaid) return;
+
+            let cAmt = parseFloat(amountStr) || 0;
+            if(y && yearsMap[y]) {
+                yearsMap[y].premium += cAmt;
+                yearsMap[y].commTotal += partComm;
                 if(isPaid) yearsMap[y].commPaid += partComm; 
                 else yearsMap[y].commPending += partComm; 
             }
-            if(fYear && fMonth && (d.getFullYear() !== fYear || (d.getMonth() + 1) !== fMonth)) return;
-            let cAmt = parseFloat(amountStr) || 0; 
+
+            if(statusFilter !== 'all' && pStatus !== statusFilter) return;
+
+            let d = dateStr ? new Date(dateStr) : (p.dateStart ? new Date(p.dateStart) : null);
+            if(fYear && fMonth && d && !isNaN(d.getTime())) {
+                if(d.getFullYear() !== fYear || (d.getMonth() + 1) !== fMonth) return;
+            }
+
             if(isPaid) { 
                 premiumPaid += cAmt; 
                 paidComm += partComm; 
             } else { 
                 premiumPending += cAmt; 
                 pendingComm += partComm; 
-                pendingListHtml += `<tr class="hover:bg-luxBg/60 transition-all cursor-pointer" onclick="openDrawer('policy', ${p.id})"><td class="p-4 font-bold text-textDark">${p.insurer}</td><td class="p-4 font-semibold text-goldAccent" onclick="event.stopPropagation(); openClientFull(${p.clientId})">${c ? c.name : "Nieznany"}</td><td class="p-4 text-sm font-bold text-textDark">${dateStr}</td><td class="p-4 text-right font-bold text-red-600">${formatPLN(cAmt)}</td><td class="p-4 text-right font-bold text-amber-600">${formatPLN(partComm)}</td></tr>`; 
             }
+
+            let statusBadge = pStatus === 'rozliczona' 
+                ? `<span class="text-[10px] bg-green-100 text-green-800 px-2 py-0.5 rounded font-bold">✅ Rozliczona z TU</span>` 
+                : (pStatus === 'anulowana' ? `<span class="text-[10px] bg-red-100 text-red-800 px-2 py-0.5 rounded font-bold">❌ Wypowiedziana</span>` : `<span class="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-bold">⏳ Nierozliczona z TU</span>`);
+            
+            let paidBadge = isPaid 
+                ? `<span class="text-[10px] text-green-700 font-bold block">Opłacona przez klienta</span>` 
+                : `<span class="text-[10px] text-red-600 font-bold block">Oczekuje na wpłatę</span>`;
+
+            listHtml += `
+                <tr class="hover:bg-luxBg/60 transition-all cursor-pointer" onclick="openDrawer('policy', '${p.id}')">
+                    <td class="p-4"><span class="font-bold text-textDark">${p.insurer}</span><br><span class="text-xs font-mono text-textMuted">${p.number || '-'}</span></td>
+                    <td class="p-4 font-semibold text-goldAccent hover:underline" onclick="event.stopPropagation(); openClientFull('${p.clientId}')">${c ? c.name : "Nieznany"}</td>
+                    <td class="p-4 text-xs font-bold text-textDark">${rataLabel}: ${dateStr || p.dateStart || '-'} ${paidBadge}</td>
+                    <td class="p-4">${statusBadge} ${p.commNote ? `<span class="block text-[11px] text-textMuted italic mt-1">💬 ${p.commNote}</span>` : ''}</td>
+                    <td class="p-4 text-right font-bold ${isPaid ? 'text-blue-600' : 'text-red-600'}">${formatPLN(cAmt)}</td>
+                    <td class="p-4 text-right font-extrabold ${isPaid ? 'text-green-600' : 'text-amber-600'}">${formatPLN(partComm)}</td>
+                </tr>`;
         };
-        if (p.firstPaymentDate) { 
-            let firstAmt = (p.installments > 1 && p.installmentDates && p.installmentDates[2]) ? p.installmentDates[2].amount : p.premium; 
-            checkRata(p.firstPaymentDate, firstAmt, p.firstPaymentPaid); 
-        }
+
+        let firstAmt = getFirstInstallmentAmount(p);
+        processInstallment(p.installments > 1 ? "I rata" : "Jednorazowo", p.firstPaymentDate || p.dateStart, firstAmt, p.firstPaymentPaid);
+
         if (p.installments > 1 && p.installmentDates) { 
             for(let i = 2; i <= p.installments; i++) { 
                 let inst = p.installmentDates[i]; 
-                if(inst && inst.date) checkRata(inst.date, inst.amount, inst.paid); 
+                if(inst) processInstallment(`Rata ${i}`, inst.date, inst.amount, inst.paid); 
             } 
         }
     });
@@ -1640,19 +1996,76 @@ function renderFinances() {
     let fpe = document.getElementById('f_pendingAmount'); if(fpe) fpe.innerText = formatPLN(pendingComm);
     let fpp = document.getElementById('f_premiumPaid'); if(fpp) fpp.innerText = formatPLN(premiumPaid); 
     let fppen = document.getElementById('f_premiumPending'); if(fppen) fppen.innerText = formatPLN(premiumPending);
-    let pb = document.getElementById('financePendingBody'); if(pb) pb.innerHTML = pendingListHtml || `<tr><td colspan="5" class="p-6 text-center text-textMuted">Brak oczekujących rat.</td></tr>`;
+    let pb = document.getElementById('financePendingBody'); if(pb) pb.innerHTML = listHtml || `<tr><td colspan="6" class="p-6 text-center text-textMuted">Brak pozycji spełniających kryteria filtra.</td></tr>`;
 }
 
 function clearFinanceFilter() { 
     document.getElementById('financeMonthFilter').value = ""; 
+    if(document.getElementById('financeStatusFilter')) document.getElementById('financeStatusFilter').value = "all";
     renderFinances(); 
 }
 
-// ================= 10. KALENDARZ =================
+// Eksport zestawienia prowizji i polis do pliku CSV (Excel)
+function exportFinancesCSV() {
+    let filterVal = document.getElementById('financeMonthFilter') ? document.getElementById('financeMonthFilter').value : "";
+    let statusFilter = document.getElementById('financeStatusFilter') ? document.getElementById('financeStatusFilter').value : 'all';
+    let fYear = filterVal ? parseInt(filterVal.split('-')[0]) : null; 
+    let fMonth = filterVal ? parseInt(filterVal.split('-')[1]) : null;
+
+    let csvRows = ["TU;Numer Polisy;Klient;PESEL/NIP;Przedmiot;Data Poczatku;Rata;Termin Płatnosci;Opłacona przez klienta;Status Rozliczenia TU;Składka (PLN);Prowizja (PLN);Notatka do prowizji"];
+
+    policiesList.forEach(p => {
+        let isCanceled = (p.settlementStatus === 'anulowana');
+        let pStatus = p.settlementStatus || 'nierozliczona';
+        if(statusFilter !== 'all' && pStatus !== statusFilter) return;
+
+        let c = clientsList.find(x => String(x.id) === String(p.clientId));
+        let cName = c ? c.name.replace(/;/g, ',') : "Nieznany";
+        let cId = c ? (c.pesel || c.nip || "") : "";
+        let subj = (p.subject || "").replace(/;/g, ',');
+        let note = (p.commNote || "").replace(/;/g, ',');
+        let totalComm = parseFloat(p.commissionAmt) || 0;
+        let numInst = p.installments || 1;
+        let partComm = (totalComm / numInst).toFixed(2).replace('.', ',');
+
+        let addCsvLine = (rataName, dateStr, amt, isPaid) => {
+            if(isCanceled && !isPaid) return;
+            let d = dateStr ? new Date(dateStr) : (p.dateStart ? new Date(p.dateStart) : null);
+            if(fYear && fMonth && d && !isNaN(d.getTime())) {
+                if(d.getFullYear() !== fYear || (d.getMonth() + 1) !== fMonth) return;
+            }
+            let cleanAmt = Number(amt || 0).toFixed(2).replace('.', ',');
+            csvRows.push(`${p.insurer};"${p.number || ''}";"${cName}";"${cId}";"${subj}";${p.dateStart || ''};${rataName};${dateStr || ''};${isPaid ? 'TAK' : 'NIE'};${pStatus};${cleanAmt};${partComm};"${note}"`);
+        };
+
+        addCsvLine(numInst > 1 ? "Rata 1" : "Calosc", p.firstPaymentDate || p.dateStart, getFirstInstallmentAmount(p), p.firstPaymentPaid);
+        if(numInst > 1 && p.installmentDates) {
+            for(let i = 2; i <= numInst; i++) {
+                let inst = p.installmentDates[i];
+                if(inst) addCsvLine(`Rata ${i}`, inst.date, inst.amount, inst.paid);
+            }
+        }
+    });
+
+    // Dodanie BOM (\uFEFF), aby polski Excel bezbłędnie odczytał polskie znaki
+    let csvContent = "\uFEFF" + csvRows.join("\r\n");
+    let blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    let url = URL.createObjectURL(blob);
+    let a = document.createElement("a");
+    a.href = url;
+    a.download = `Raport_Prowizji_${filterVal || 'Wszystkie'}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+// ================= 10. KALENDARZ Z INTERAKTYWNYM WIDOKIEM DZIENNYM =================
 function renderCalendar() {
     const grid = document.getElementById('calendarGrid'); 
     const evList = document.getElementById('calendarEventsList'); 
     const label = document.getElementById('calendarMonthLabel');
+    const sideTitle = document.getElementById('calendarSideTitle');
     if(!grid || !evList || !label) return;
     
     const year = currentCalendarDate.getFullYear(); 
@@ -1665,23 +2078,51 @@ function renderCalendar() {
     const startDay = firstDay === 0 ? 6 : firstDay - 1;
     
     grid.innerHTML = ''; 
-    evList.innerHTML = ''; 
     let eventsInMonth = [];
     
     clientsList.forEach(c => { 
-        if(c.birth && new Date(c.birth).getMonth() === month) {
-            eventsInMonth.push({ day: new Date(c.birth).getDate(), type: '🎂', text: `${c.name} (Urodziny)` }); 
+        if(c.birth) {
+            let bD = new Date(c.birth);
+            if(bD.getMonth() === month) {
+                eventsInMonth.push({ day: bD.getDate(), type: '🎂', text: `${c.name} (Urodziny)`, action: () => openClientFull(c.id) });
+            }
         }
     });
     vehiclesList.forEach(v => { 
-        if(v.inspection && new Date(v.inspection).getMonth() === month && new Date(v.inspection).getFullYear() === year) {
-            eventsInMonth.push({ day: new Date(v.inspection).getDate(), type: '🔧', text: `${v.plate} (Koniec Przeglądu)` }); 
+        if(v.inspection) {
+            let iD = new Date(v.inspection);
+            if(iD.getMonth() === month && iD.getFullYear() === year) {
+                eventsInMonth.push({ day: iD.getDate(), type: '🔧', text: `${v.plate} - Koniec przeglądu (${v.brand})`, action: () => openClientFull(v.clientId) });
+            }
         }
     });
     policiesList.forEach(p => { 
-        if(p.dateEnd && new Date(p.dateEnd).getMonth() === month && new Date(p.dateEnd).getFullYear() === year) {
-            let c = clientsList.find(x => x.id === p.clientId); 
-            eventsInMonth.push({ day: new Date(p.dateEnd).getDate(), type: '🛡️', text: `${c ? c.name : 'Polisa'} - Koniec (${p.insurer})` });
+        if(p.settlementStatus === 'anulowana') return;
+        let c = clientsList.find(x => String(x.id) === String(p.clientId));
+        let cName = c ? c.name : 'Polisa';
+
+        if(p.dateEnd) {
+            let eD = new Date(p.dateEnd);
+            if(eD.getMonth() === month && eD.getFullYear() === year) {
+                eventsInMonth.push({ day: eD.getDate(), type: '🛡️', text: `${cName} - Koniec polisy ${p.insurer} (${p.subject})`, action: () => openDrawer('policy', p.id) });
+            }
+        }
+        if(p.firstPaymentDate && !p.firstPaymentPaid) {
+            let fpD = new Date(p.firstPaymentDate);
+            if(fpD.getMonth() === month && fpD.getFullYear() === year) {
+                eventsInMonth.push({ day: fpD.getDate(), type: '💸', text: `${cName} - I Rata (${p.insurer})`, action: () => openDrawer('policy', p.id) });
+            }
+        }
+        if(p.installments > 1 && p.installmentDates) {
+            for(let i in p.installmentDates) {
+                let inst = p.installmentDates[i];
+                if(inst.date && !inst.paid) {
+                    let inD = new Date(inst.date);
+                    if(inD.getMonth() === month && inD.getFullYear() === year) {
+                        eventsInMonth.push({ day: inD.getDate(), type: '💸', text: `${cName} - Rata ${i} (${formatPLN(inst.amount)})`, action: () => openDrawer('policy', p.id) });
+                    }
+                }
+            }
         }
     });
 
@@ -1692,33 +2133,75 @@ function renderCalendar() {
         let dayEvs = eventsInMonth.filter(e => e.day === d);
         let evMarkers = dayEvs.map(e => e.type).join(' ');
         let isToday = (d === new Date().getDate() && month === new Date().getMonth() && year === new Date().getFullYear());
-        let bgClass = isToday ? 'bg-goldAccent/20 border-goldAccent' : 'bg-white border-luxBorder';
-        grid.innerHTML += `<div class="p-2 border ${bgClass} rounded min-h-[60px] text-sm"><span class="font-bold ${isToday ? 'text-goldAccent' : ''}">${d}</span><div class="text-xs mt-1">${evMarkers}</div></div>`;
+        let isSelected = (selectedCalendarDay === d);
+        
+        let bgClass = 'bg-white border-luxBorder';
+        if(isToday) bgClass = 'bg-goldAccent/20 border-goldAccent';
+        if(isSelected) bgClass = 'bg-indigo-100 border-indigo-500 ring-2 ring-indigo-400';
+
+        grid.innerHTML += `
+            <div onclick="selectCalendarDay(${d})" class="p-2 border ${bgClass} rounded min-h-[60px] text-sm cursor-pointer hover:bg-gray-50 transition-all">
+                <div class="flex justify-between items-center">
+                    <span class="font-bold ${isToday ? 'text-goldAccent' : ''}">${d}</span>
+                    ${dayEvs.length > 0 ? `<span class="text-[10px] bg-gray-200 px-1.5 rounded-full font-bold">${dayEvs.length}</span>` : ''}
+                </div>
+                <div class="text-xs mt-1 truncate">${evMarkers}</div>
+            </div>`;
     }
-    
-    eventsInMonth.sort((a,b) => a.day - b.day).forEach(e => {
-        evList.innerHTML += `<div class="p-3 bg-luxBg rounded-xl border border-luxBorder text-sm"><span class="font-bold text-textDark mr-2">${e.day} ${monthNames[month].substring(0,3)}</span> ${e.type} ${e.text}</div>`;
-    });
-    if(eventsInMonth.length === 0) evList.innerHTML = `<p class="text-xs text-textMuted">Brak zapisanych wydarzeń na ten miesiąc.</p>`;
+
+    if(selectedCalendarDay) {
+        if(sideTitle) sideTitle.innerText = `📅 Dzień: ${selectedCalendarDay} ${monthNames[month]} ${year}`;
+        let dayEvents = eventsInMonth.filter(e => e.day === selectedCalendarDay);
+        
+        evList.innerHTML = `<button onclick="selectedCalendarDay=null; renderCalendar();" class="w-full text-xs bg-gray-200 hover:bg-gray-300 px-3 py-1.5 rounded-lg font-bold mb-2">⬅ Pokaż cały miesiąc</button>`;
+        if(dayEvents.length > 0) {
+            dayEvents.forEach((e, idx) => {
+                let div = document.createElement('div');
+                div.className = "p-3 bg-luxBg rounded-xl border border-luxBorder text-sm cursor-pointer hover:border-goldAccent transition-all";
+                div.innerHTML = `<b>${e.type}</b> ${e.text}`;
+                if(e.action) div.onclick = e.action;
+                evList.appendChild(div);
+            });
+        } else {
+            evList.innerHTML += `<p class="text-xs text-textMuted mt-2 text-center py-4">Brak przypisanych wydarzeń w tym dniu.</p>`;
+        }
+    } else {
+        if(sideTitle) sideTitle.innerText = `Wydarzenia w tym miesiącu`;
+        evList.innerHTML = `<p class="text-xs text-textMuted mb-2 italic">Kliknij dowolny dzień na siatce, aby wyfiltrować jego zadania.</p>`;
+        eventsInMonth.sort((a,b) => a.day - b.day).forEach(e => {
+            let div = document.createElement('div');
+            div.className = "p-3 bg-luxBg rounded-xl border border-luxBorder text-sm cursor-pointer hover:border-goldAccent transition-all";
+            div.innerHTML = `<span class="font-bold text-textDark mr-2">${e.day} ${monthNames[month].substring(0,3)}</span> ${e.type} ${e.text}`;
+            div.onclick = () => { selectCalendarDay(e.day); if(e.action) e.action(); };
+            evList.appendChild(div);
+        });
+        if(eventsInMonth.length === 0) evList.innerHTML += `<p class="text-xs text-textMuted">Brak zapisanych wydarzeń na ten miesiąc.</p>`;
+    }
+}
+
+function selectCalendarDay(day) {
+    selectedCalendarDay = day;
+    renderCalendar();
 }
 
 function changeCalendarMonth(offset) {
+    selectedCalendarDay = null;
     currentCalendarDate.setMonth(currentCalendarDate.getMonth() + offset);
     renderCalendar();
 }
 
 function addCalendarEvent(type) {
     if(type === 'client' && currentOpenId) {
-        let c = clientsList.find(x => x.id === currentOpenId);
+        let c = clientsList.find(x => String(x.id) === String(currentOpenId));
         if(c) {
-            let text = `Skontaktować się z klientem: ${c.name}, tel: ${c.phone || '-'}`;
+            let text = `Kontakt: ${c.name}, tel: ${c.phone || '-'}`;
             let url = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent('Kontakt: ' + c.name)}&details=${encodeURIComponent(text)}`;
             window.open(url, '_blank');
         }
     }
 }
 
-// ================= 11. USTAWIENIA, SŁOWNIKI, EKSPORT =================
+// ================= 11. USTAWIENIA I SŁOWNIKI =================
 function renderInsurersLibrary() {
     let listBody = document.getElementById('insurersLibraryBody'); 
     if(listBody) listBody.innerHTML = "";
@@ -1766,7 +2249,7 @@ function renderCommissionDict() {
         return;
     }
     commDictList.forEach(r => { 
-        b.innerHTML += `<tr class="hover:bg-luxBg"><td class="p-2 font-bold">${r.insurer}</td><td class="p-2 text-blue-800 font-semibold">${r.risk}</td><td class="p-2 font-bold text-goldAccent text-right">${r.pct}%</td><td class="p-2 text-right"><button onclick="deleteCommRule(${r.id})" class="text-red-500 font-bold text-xs">Usuń</button></td></tr>`; 
+        b.innerHTML += `<tr class="hover:bg-luxBg"><td class="p-2 font-bold">${r.insurer}</td><td class="p-2 text-blue-800 font-semibold">${r.risk}</td><td class="p-2 font-bold text-goldAccent text-right">${r.pct}%</td><td class="p-2 text-right"><button onclick="deleteCommRule('${r.id}')" class="text-red-500 font-bold text-xs">Usuń</button></td></tr>`; 
     });
 }
 
@@ -1785,7 +2268,7 @@ function addCommissionRule() {
 }
 
 function deleteCommRule(id) { 
-    commDictList = commDictList.filter(r => r.id !== id); 
+    commDictList = commDictList.filter(r => String(r.id) !== String(id)); 
     syncAndRender(); 
     updateRiskDatalist(); 
 }

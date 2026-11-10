@@ -1,8 +1,7 @@
 // ui.js - Logika interfejsu, skrótów klawiszowych (Enter / Escape) i obsługi okien
 
-// 1. GLOBALNY NASŁUCH KLAWISZY (ESCAPE oraz ENTER)
 document.addEventListener('keydown', function(event) {
-    // ESCAPE - zamyka wszystkie aktywne modale, szuflady i podpowiedzi
+    // ESCAPE - zamyka aktywne modale, szuflady i podpowiedzi wyszukiwarki
     if (event.key === "Escape") {
         closeClientModal();
         closeClientFull();
@@ -16,12 +15,12 @@ document.addEventListener('keydown', function(event) {
         }
     }
 
-    // ENTER - kontekstowe zatwierdzanie formularzy
+    // ENTER - inteligentne zatwierdzanie formularzy
     if (event.key === "Enter") {
         const activeEl = document.activeElement;
-        if (!activeEl || activeEl.tagName === 'TEXTAREA') return; // W polach wielolinijkowych Enter robi nową linię
+        if (!activeEl || activeEl.tagName === 'TEXTAREA') return;
 
-        // Szybkie dodawanie klienta
+        // Szybkie dodawanie klienta (modal z pulpitu/zakładki klienci)
         const clientModal = document.getElementById('clientModal');
         if (clientModal && clientModal.style.display === 'flex') {
             event.preventDefault();
@@ -29,24 +28,43 @@ document.addEventListener('keydown', function(event) {
             return;
         }
 
-        // Kreator polisy - Krok 4: Dodawanie ryzyka po wciśnięciu Enter w polach ryzyka
+        // Kreator polisy - Krok 1: Szybkie zapisanie nowego klienta/firmy w locie
+        if (['p_quickName', 'p_quickBirth', 'p_quickLicense'].includes(activeEl.id)) {
+            event.preventDefault();
+            if (typeof saveQuickClientFromPolicy === 'function') saveQuickClientFromPolicy();
+            return;
+        }
+
+        // Kreator polisy - Krok 4: Dodawanie ryzyka
         if (['p_riskNameInput', 'p_riskPremInput', 'p_riskPctInput'].includes(activeEl.id)) {
             event.preventDefault();
             if (typeof addRiskToTemp === 'function') addRiskToTemp();
             return;
         }
 
-        // Kreator oferty - Dodawanie wariantu po wciśnięciu Enter
+        // Szuflada polisy - Zapis ręcznej prowizji po wciśnięciu Enter
+        if (['pd_commInput', 'pd_commNoteInput'].includes(activeEl.id)) {
+            event.preventDefault();
+            if (typeof saveDrawerCommissionOverride === 'function') saveDrawerCommissionOverride();
+            return;
+        }
+
+        // Kreator oferty - Dodawanie wariantu
         if (['off_risks', 'off_rata', 'off_prem'].includes(activeEl.id)) {
             event.preventDefault();
             if (typeof addOfferRow === 'function') addOfferRow();
             return;
         }
 
-        // Ustawienia - Dodawanie TU lub reguły prowizji
+        // Ustawienia - Dodawanie TU, marki lub reguły prowizyjnej
         if (activeEl.id === 'set_newInsurer') {
             event.preventDefault();
             if (typeof addInsurerToLibrary === 'function') addInsurerToLibrary();
+            return;
+        }
+        if (activeEl.id === 'set_newBrand') {
+            event.preventDefault();
+            if (typeof addBrandFromSettings === 'function') addBrandFromSettings();
             return;
         }
         if (['set_risk', 'set_pct'].includes(activeEl.id)) {
@@ -57,7 +75,7 @@ document.addEventListener('keydown', function(event) {
     }
 });
 
-// 2. ZARZĄDZANIE ZAKŁADKAMI
+// Przełączanie głównych zakładek
 function switchTab(t) {
     const tabs = ['dashboard', 'clients', 'policies', 'offers', 'renewals', 'finances', 'calendar', 'settings'];
     
@@ -77,7 +95,7 @@ function switchTab(t) {
     if (typeof syncAndRender === 'function') syncAndRender(false);
 }
 
-// 3. OBSŁUGA OKIEN (MODALI)
+// Obsługa modali
 function openClientModal() { 
     document.getElementById('addName').value = "";
     document.getElementById('addPesel').value = "";
@@ -137,14 +155,14 @@ function closeDrawer(type) {
     }
 }
 
-// 4. PRZEŁĄCZNIKI WEWNĄTRZ KART I KREATORÓW
+// Przełączanie edycji danych klienta w karcie pełnej
 function toggleCfmEdit() {
     let em = document.getElementById('cfm_editMode');
     let vm = document.getElementById('cfm_viewMode');
     let btn = document.getElementById('cfm_btnEdit');
     if(em.classList.contains('hidden')) {
         if (typeof clientsList !== 'undefined' && typeof currentOpenId !== 'undefined') {
-            let c = clientsList.find(x => x.id === currentOpenId);
+            let c = clientsList.find(x => String(x.id) === String(currentOpenId));
             if (c) {
                 document.getElementById('ce_name').value = c.name || "";
                 document.getElementById('ce_pesel').value = c.pesel || "";
@@ -168,15 +186,43 @@ function toggleCfmEdit() {
     }
 }
 
+// Otwieranie / zamykanie formularza nowego pojazdu w garażu
 function toggleAddVehicle() { 
     let box = document.getElementById('cfm_addVehicleBox');
+    if (typeof editingVehicleId !== 'undefined') editingVehicleId = null;
+    
     box.classList.toggle('hidden');
     if (!box.classList.contains('hidden')) {
-        ['v_brand', 'v_model', 'v_year', 'v_plate', 'v_vin', 'v_inspection'].forEach(id => {
+        let titleEl = document.getElementById('v_formTitle');
+        if(titleEl) titleEl.innerText = "Nowy Pojazd";
+        ['v_brand', 'v_model', 'v_year', 'v_cap', 'v_kw', 'v_km', 'v_plate', 'v_mileage', 'v_vin', 'v_firstReg', 'v_inspection'].forEach(id => {
             if(document.getElementById(id)) document.getElementById(id).value = "";
         });
         if(document.getElementById('v_anglik')) document.getElementById('v_anglik').checked = false;
         document.getElementById('v_brand').focus();
+    }
+}
+
+// Automatyczny przelicznik kW <-> KM (1 kW = 1.35962 KM)
+function calcKmFromKw(kwVal) {
+    let kw = parseFloat(kwVal);
+    let kmEl = document.getElementById('v_km');
+    if (!kmEl) return;
+    if (!isNaN(kw) && kw > 0) {
+        kmEl.value = Math.round(kw * 1.35962);
+    } else {
+        kmEl.value = "";
+    }
+}
+
+function calcKwFromKm(kmVal) {
+    let km = parseFloat(kmVal);
+    let kwEl = document.getElementById('v_kw');
+    if (!kwEl) return;
+    if (!isNaN(km) && km > 0) {
+        kwEl.value = Math.round(km / 1.35962);
+    } else {
+        kwEl.value = "";
     }
 }
 
@@ -191,7 +237,6 @@ function toggleAddProperty() {
     }
 }
 
-// Przełączanie widoku Krok 3 w kreatorze polisy (Pojazd vs Majątek/Inne)
 function handlePolicyTypeChange() {
     let typeEl = document.getElementById('p_type');
     if (!typeEl) return;
@@ -201,5 +246,8 @@ function handlePolicyTypeChange() {
     if (vehSec && genSec) {
         vehSec.classList.toggle('hidden', !isCar);
         genSec.classList.toggle('hidden', isCar);
+    }
+    if (isCar && typeof populateGarageSelectForPolicy === 'function') {
+        populateGarageSelectForPolicy();
     }
 }

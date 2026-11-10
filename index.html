@@ -5,14 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Agent 1.0 Pro - CRM dla Agenta</title>
     
-    <!-- Zewnętrzne biblioteki -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     
-    <!-- Konfiguracja Tailwind -->
     <script>
         tailwind.config = {
             theme: {
@@ -34,7 +32,6 @@
         .modal-fullscreen { width: 95vw; max-width: 1400px; height: 90vh; }
         #loginScreen { backdrop-filter: blur(10px); }
 
-        /* Styl dedykowanego wydruku planu dnia - ukrywa CRM, pokazuje tylko czystą kartę */
         @media print {
             body * { visibility: hidden !important; }
             #todayPrintSheet, #todayPrintSheet * { visibility: visible !important; }
@@ -45,7 +42,12 @@
 </head>
 <body class="bg-luxBg text-textDark min-h-screen flex flex-col relative">
 
-    <!-- DEDYKOWANY ARKUSZ DO DRUKU "PLAN NA DZIŚ" (Widoczny wyłącznie podczas drukowania) -->
+    <!-- POWIADOMIENIE O SKOPIOWANIU (TOAST) -->
+    <div id="copyToast" class="fixed bottom-5 right-5 bg-textDark text-white px-4 py-2.5 rounded-xl shadow-2xl text-xs font-bold z-[200] hidden transition-all border border-goldAccent">
+        📋 Skopiowano do schowka!
+    </div>
+
+    <!-- WYDRUK PLANU DNIA -->
     <div id="todayPrintSheet" class="hidden text-black bg-white">
         <div class="border-b-2 border-black pb-3 mb-4 flex justify-between items-end">
             <div>
@@ -92,7 +94,7 @@
         </div>
     </div>
 
-    <!-- 1. EKRAN LOGOWANIA -->
+    <!-- LOGOWANIE -->
     <div id="loginScreen" class="fixed inset-0 bg-luxBg/95 z-[100] flex items-center justify-center transition-opacity">
         <div class="lux-card rounded-3xl p-8 w-full max-w-md text-center shadow-2xl border border-goldAccent/30 relative overflow-hidden">
             <div class="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-goldAccent to-amber-900"></div>
@@ -114,7 +116,7 @@
         </div>
     </div>
 
-    <!-- 2. GŁÓWNY NAGŁÓWEK -->
+    <!-- NAGŁÓWEK -->
     <header class="border-b border-luxBorder bg-luxCard/90 backdrop-blur-md sticky top-0 z-40 hidden" id="mainHeader">
         <div class="max-w-7xl mx-auto px-4 py-3.5 flex flex-col lg:flex-row justify-between items-center gap-4">
             <div class="flex items-center gap-3">
@@ -126,7 +128,7 @@
             </div>
             
             <div class="w-full lg:w-96 relative">
-                <input type="text" id="globalSearch" oninput="handleGlobalSearch(this.value)" placeholder="Szukaj klienta, auta, polisy..." class="w-full bg-luxBg border border-luxBorder rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-goldAccent">
+                <input type="text" id="globalSearch" oninput="handleGlobalSearch(this.value)" placeholder="Szukaj klienta, auta, VIN, polisy..." class="w-full bg-luxBg border border-luxBorder rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-goldAccent">
                 <div id="globalSearchResults" class="absolute top-full left-0 right-0 mt-2 bg-white rounded-xl shadow-2xl border border-luxBorder hidden z-50 max-h-72 overflow-y-auto"></div>
             </div>
 
@@ -144,10 +146,10 @@
         </div>
     </header>
 
-    <!-- 3. GŁÓWNA ZAWARTOŚĆ -->
+    <!-- ZAWARTOŚĆ -->
     <main class="max-w-7xl mx-auto px-4 py-8 flex-grow w-full hidden" id="mainAppContent">
         
-        <!-- ZAKŁADKA: PULPIT -->
+        <!-- PULPIT -->
         <section id="tab-dashboard" class="space-y-6">
             <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div class="lux-card p-5 rounded-2xl border-l-4 border-goldAccent"><span class="text-[10px] font-bold text-textMuted uppercase block">Wystawione (Ten Mc)</span><p id="dash_countPolicies" class="text-2xl font-extrabold text-textDark mt-1">0</p></div>
@@ -180,11 +182,11 @@
                     <div id="dash_thirtyDays" class="space-y-2"></div>
                 </div>
 
-                <!-- NOTATNIK I LISTA ZADAŃ (TASKI) -->
+                <!-- NOTATNIK I TASKI -->
                 <div class="lux-card rounded-2xl p-6 bg-amber-50/50 border border-amber-200 flex flex-col justify-between space-y-4">
                     <div>
                         <h3 class="font-bold text-lg mb-2 text-amber-900">📌 Szybki Notatnik</h3>
-                        <textarea id="quickNotesArea" oninput="saveQuickNotes()" rows="4" placeholder="Podręczne notatki (zapisują się w locie)..." class="w-full bg-white border border-amber-200 rounded-xl p-3 text-sm outline-none focus:border-amber-400"></textarea>
+                        <textarea id="quickNotesArea" oninput="saveQuickNotes()" rows="4" placeholder="Podręczne notatki..." class="w-full bg-white border border-amber-200 rounded-xl p-3 text-sm outline-none focus:border-amber-400"></textarea>
                     </div>
                     <div>
                         <div class="flex justify-between items-center mb-2">
@@ -205,7 +207,7 @@
             </div>
         </section>
 
-        <!-- ZAKŁADKA: KLIENCI -->
+        <!-- KLIENCI -->
         <section id="tab-clients" class="space-y-6 hidden">
             <div class="flex flex-col sm:flex-row justify-between items-center gap-4"><h2 class="text-2xl font-bold">Baza Klientów</h2><button onclick="openClientModal()" class="bg-goldAccent hover:bg-goldHover text-white font-semibold px-5 py-2.5 rounded-xl shadow-md">+ Dodaj Klienta</button></div>
             <div class="lux-card rounded-2xl overflow-hidden shadow-sm">
@@ -214,15 +216,15 @@
             </div>
         </section>
         
-        <!-- ZAKŁADKA: POLISY -->
+        <!-- POLISY -->
         <section id="tab-policies" class="space-y-6 hidden">
             <div class="flex flex-col sm:flex-row justify-between items-center gap-4"><h2 class="text-2xl font-bold">Zarządzanie Polisami</h2><button onclick="openPolicyModal()" class="bg-goldAccent hover:bg-goldHover text-white font-semibold px-5 py-2.5 rounded-xl shadow-md">+ Dodaj polisę</button></div>
             <div class="lux-card rounded-2xl overflow-hidden shadow-sm">
-                <div class="overflow-x-auto"><table class="w-full text-left border-collapse"><thead><tr class="border-b border-luxBorder text-xs text-textMuted uppercase bg-luxBg/30"><th class="p-4">TU / Nr Polisy</th><th class="p-4">Klient</th><th class="p-4">Okres i Przedmiot</th><th class="p-4 text-right">Składka przypisana</th></tr></thead><tbody id="policiesTableBody" class="divide-y divide-luxBorder text-sm"></tbody></table></div>
+                <div class="overflow-x-auto"><table class="w-full text-left border-collapse"><thead><tr class="border-b border-luxBorder text-xs text-textMuted uppercase bg-luxBg/30"><th class="p-4">TU / Nr Polisy</th><th class="p-4">Klient</th><th class="p-4">Okres i Przedmiot</th><th class="p-4 text-right">Składka / Prowizja</th></tr></thead><tbody id="policiesTableBody" class="divide-y divide-luxBorder text-sm"></tbody></table></div>
             </div>
         </section>
 
-        <!-- ZAKŁADKA: OFERTY -->
+        <!-- OFERTY -->
         <section id="tab-offers" class="space-y-6 hidden">
             <div class="flex flex-col sm:flex-row justify-between items-center gap-4">
                 <div><h2 class="text-2xl font-bold">Zapisane Oferty</h2><p class="text-xs text-textMuted">Wracaj do ofert, zamieniaj je w polisy lub drukuj PDF.</p></div>
@@ -233,7 +235,7 @@
             </div>
         </section>
 
-        <!-- ZAKŁADKA: ODNOWIENIA -->
+        <!-- ODNOWIENIA -->
         <section id="tab-renewals" class="space-y-6 hidden">
             <h2 class="text-2xl font-bold text-textDark">Lejek Odnowień (&lt; 45 dni)</h2>
             <div class="grid grid-cols-1 md:grid-cols-4 gap-4" id="kanbanBoard">
@@ -244,28 +246,43 @@
             </div>
         </section>
 
-        <!-- ZAKŁADKA: FINANSE -->
+        <!-- FINANSE (Z filtrem statusu rozliczenia i eksportem CSV) -->
         <section id="tab-finances" class="space-y-6 hidden">
             <h2 class="text-2xl font-bold">Statystyki Roczne (YOY)</h2>
             <div class="lux-card rounded-2xl overflow-hidden shadow-sm">
-                <div class="overflow-x-auto"><table class="w-full text-left border-collapse"><thead><tr class="border-b border-luxBorder text-xs text-textMuted uppercase bg-luxBg/30"><th class="p-4">Rok</th><th class="p-4 text-right">Przypis</th><th class="p-4 text-right">Prowizja Całk.</th><th class="p-4 text-right">Wypłacono</th><th class="p-4 text-right">Do Wypłaty</th></tr></thead><tbody id="yearlyStatsBody" class="divide-y divide-luxBorder text-sm"></tbody></table></div>
+                <div class="overflow-x-auto"><table class="w-full text-left border-collapse"><thead><tr class="border-b border-luxBorder text-xs text-textMuted uppercase bg-luxBg/30"><th class="p-4">Rok</th><th class="p-4 text-right">Przypis</th><th class="p-4 text-right">Prowizja Całk.</th><th class="p-4 text-right">Wypłacono (Rozliczone)</th><th class="p-4 text-right">Do Wypłaty</th></tr></thead><tbody id="yearlyStatsBody" class="divide-y divide-luxBorder text-sm"></tbody></table></div>
             </div>
-            <div class="flex justify-between items-center mt-8">
-                <h2 class="text-2xl font-bold">Cash-flow Miesięczny</h2>
-                <div class="flex gap-2"><input type="month" id="financeMonthFilter" onchange="renderFinances()" class="border bg-white rounded-lg px-2 py-1 text-sm"><button onclick="clearFinanceFilter()" class="bg-gray-200 px-3 py-1 rounded-lg text-sm font-semibold">Wszystkie</button></div>
+            
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mt-8">
+                <h2 class="text-2xl font-bold">Zestawienie Prowizji i Cash-flow</h2>
+                <div class="flex flex-wrap gap-2 items-center">
+                    <select id="financeStatusFilter" onchange="renderFinances()" class="border bg-white rounded-lg px-2.5 py-1.5 text-xs font-bold text-textDark">
+                        <option value="all">Wszystkie statusy TU</option>
+                        <option value="nierozliczona">⏳ Tylko Nierozliczone z TU</option>
+                        <option value="rozliczona">✅ Tylko Rozliczone z TU</option>
+                    </select>
+                    <input type="month" id="financeMonthFilter" onchange="renderFinances()" class="border bg-white rounded-lg px-2.5 py-1 text-sm">
+                    <button onclick="clearFinanceFilter()" class="bg-gray-200 hover:bg-gray-300 px-3 py-1.5 rounded-lg text-xs font-bold">Wszystkie m-ce</button>
+                    <button onclick="exportFinancesCSV()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm">📊 Eksport CSV (Excel)</button>
+                </div>
             </div>
+
             <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4">
-                <div class="bg-green-50 p-4 rounded-xl border border-green-200"><span class="text-[10px] uppercase font-bold text-green-800">Prowizje Rozliczone</span><p id="f_paidAmount" class="text-xl font-bold text-green-600 mt-1">0,00 PLN</p></div>
+                <div class="bg-green-50 p-4 rounded-xl border border-green-200"><span class="text-[10px] uppercase font-bold text-green-800">Prowizje (Opłacone raty)</span><p id="f_paidAmount" class="text-xl font-bold text-green-600 mt-1">0,00 PLN</p></div>
                 <div class="bg-amber-50 p-4 rounded-xl border border-amber-200"><span class="text-[10px] uppercase font-bold text-amber-800">Prowizje Oczekujące</span><p id="f_pendingAmount" class="text-xl font-bold text-amber-600 mt-1">0,00 PLN</p></div>
                 <div class="bg-blue-50 p-4 rounded-xl border border-blue-200"><span class="text-[10px] uppercase font-bold text-blue-800">Składki Opłacone</span><p id="f_premiumPaid" class="text-xl font-bold text-blue-600 mt-1">0,00 PLN</p></div>
                 <div class="bg-red-50 p-4 rounded-xl border border-red-200"><span class="text-[10px] uppercase font-bold text-red-800">Składki Oczekujące</span><p id="f_premiumPending" class="text-xl font-bold text-red-600 mt-1">0,00 PLN</p></div>
             </div>
+
             <div class="lux-card rounded-2xl overflow-hidden shadow-sm mt-4">
-                <div class="overflow-x-auto"><table class="w-full text-left border-collapse"><thead><tr class="border-b border-luxBorder text-xs text-textMuted uppercase bg-luxBg/30"><th class="p-4">TU</th><th class="p-4">Klient</th><th class="p-4">Termin Raty</th><th class="p-4 text-right">Składka oczekująca</th><th class="p-4 text-right">Zablokowana Prowizja</th></tr></thead><tbody id="financePendingBody" class="divide-y divide-luxBorder text-sm"></tbody></table></div>
+                <div class="p-3 bg-luxBg/50 border-b border-luxBorder flex justify-between items-center">
+                    <span class="text-xs font-bold text-textMuted uppercase">Lista polis i rat w wybranym okresie</span>
+                </div>
+                <div class="overflow-x-auto"><table class="w-full text-left border-collapse"><thead><tr class="border-b border-luxBorder text-xs text-textMuted uppercase bg-luxBg/30"><th class="p-4">TU / Polisa</th><th class="p-4">Klient</th><th class="p-4">Rata / Termin</th><th class="p-4">Status TU / Notatka</th><th class="p-4 text-right">Składka</th><th class="p-4 text-right">Prowizja</th></tr></thead><tbody id="financePendingBody" class="divide-y divide-luxBorder text-sm"></tbody></table></div>
             </div>
         </section>
 
-        <!-- ZAKŁADKA: KALENDARZ -->
+        <!-- KALENDARZ -->
         <section id="tab-calendar" class="space-y-6 hidden">
             <div class="flex flex-col sm:flex-row justify-between items-center gap-4">
                 <h2 class="text-2xl font-bold">Kalendarz i Przypomnienia</h2>
@@ -283,26 +300,31 @@
                     <div id="calendarGrid" class="grid grid-cols-7 gap-2"></div>
                 </div>
                 <div class="lux-card rounded-2xl p-6 space-y-4">
-                    <h3 class="font-bold text-lg border-b border-luxBorder pb-2">Wydarzenia w tym miesiącu</h3>
+                    <h3 id="calendarSideTitle" class="font-bold text-lg border-b border-luxBorder pb-2">Wydarzenia w tym miesiącu</h3>
                     <div id="calendarEventsList" class="space-y-3 max-h-[500px] overflow-y-auto pr-2"></div>
                 </div>
             </div>
         </section>
 
-        <!-- ZAKŁADKA: USTAWIENIA -->
+        <!-- USTAWIENIA -->
         <section id="tab-settings" class="space-y-6 hidden">
             <h2 class="text-2xl font-bold text-textDark">⚙️ Słowniki i Administracja</h2>
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div class="lux-card rounded-2xl p-6">
                     <h3 class="font-bold text-lg mb-2">Biblioteka TU</h3>
                     <div class="flex gap-2 mb-4"><input type="text" id="set_newInsurer" placeholder="Nazwa TU" class="flex-grow border p-2 rounded-xl text-sm uppercase"><button onclick="addInsurerToLibrary()" class="bg-textDark text-white px-4 rounded-xl font-bold">Dodaj</button></div>
                     <div class="overflow-y-auto max-h-60 border border-luxBorder rounded-xl"><table class="w-full text-left border-collapse"><tbody id="insurersLibraryBody" class="divide-y divide-luxBorder text-sm"></tbody></table></div>
                 </div>
                 <div class="lux-card rounded-2xl p-6">
+                    <h3 class="font-bold text-lg mb-2">Baza Marek Pojazdów</h3>
+                    <div class="flex gap-2 mb-4"><input type="text" id="set_newBrand" placeholder="Dopisz markę..." class="flex-grow border p-2 rounded-xl text-sm"><button onclick="addBrandFromSettings()" class="bg-textDark text-white px-4 rounded-xl font-bold">Dodaj</button></div>
+                    <div class="overflow-y-auto max-h-60 border border-luxBorder rounded-xl"><table class="w-full text-left border-collapse"><tbody id="brandsLibraryBody" class="divide-y divide-luxBorder text-sm"></tbody></table></div>
+                </div>
+                <div class="lux-card rounded-2xl p-6">
                     <h3 class="font-bold text-lg mb-2">Słownik Prowizji</h3>
                     <div class="space-y-2 mb-4 bg-luxBg p-3 rounded-xl border border-luxBorder">
-                        <div class="grid grid-cols-2 gap-2"><div><label class="text-[10px] uppercase">TU</label><select id="set_insurer" class="w-full border p-2 rounded-lg text-sm mt-1"></select></div><div><label class="text-[10px] uppercase">Ryzyko</label><input type="text" id="set_risk" class="w-full border p-2 rounded-lg text-sm mt-1 uppercase" placeholder="np. OC lub AC"></div></div>
-                        <div class="grid grid-cols-2 gap-2 items-end"><div><label class="text-[10px] uppercase">Prowizja (%)</label><input type="number" id="set_pct" class="w-full border p-2 rounded-lg text-sm mt-1" placeholder="10"></div><button onclick="addCommissionRule()" class="w-full bg-goldAccent text-white py-2 rounded-lg font-bold">Zapisz</button></div>
+                        <div class="grid grid-cols-2 gap-2"><div><label class="text-[10px] uppercase">TU</label><select id="set_insurer" class="w-full border p-2 rounded-lg text-sm mt-1 bg-white"></select></div><div><label class="text-[10px] uppercase">Ryzyko</label><input type="text" id="set_risk" class="w-full border p-2 rounded-lg text-sm mt-1 uppercase bg-white" placeholder="np. OC lub AC"></div></div>
+                        <div class="grid grid-cols-2 gap-2 items-end"><div><label class="text-[10px] uppercase">Prowizja (%)</label><input type="number" id="set_pct" class="w-full border p-2 rounded-lg text-sm mt-1 bg-white" placeholder="10"></div><button onclick="addCommissionRule()" class="w-full bg-goldAccent text-white py-2 rounded-lg font-bold">Zapisz</button></div>
                     </div>
                     <div class="overflow-y-auto max-h-40 border border-luxBorder rounded-xl"><table class="w-full text-left border-collapse"><thead class="bg-luxBg text-[10px] uppercase sticky top-0"><tr><th class="p-2">TU</th><th class="p-2">Ryzyko</th><th class="p-2 text-right">Stawka</th><th class="p-2"></th></tr></thead><tbody id="commissionDictBody" class="divide-y divide-luxBorder text-sm"></tbody></table></div>
                 </div>
@@ -311,13 +333,22 @@
         </section>
     </main>
 
-    <!-- 4. MODALE -->
+    <!-- MODALE -->
     
-    <!-- MODAL: KARTA KLIENTA PEŁNA -->
+    <!-- KARTA KLIENTA PEŁNA -->
     <div id="clientFullModalOverlay" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-2 sm:p-4" onclick="if(event.target === this) closeClientFull()">
         <div class="bg-luxCard shadow-2xl modal-fullscreen rounded-2xl flex flex-col relative overflow-hidden mx-auto my-auto border border-luxBorder" onclick="event.stopPropagation()">
             <div class="bg-luxBg border-b border-luxBorder px-6 py-4 flex justify-between items-center sticky top-0 z-10">
-                <div><h2 class="text-2xl font-bold text-textDark" id="cfm_name">-</h2><p class="text-sm font-mono text-textMuted" id="cfm_pesel">PESEL / NIP: -</p></div>
+                <div>
+                    <div class="flex items-center gap-2">
+                        <h2 class="text-2xl font-bold text-textDark" id="cfm_name">-</h2>
+                        <button onclick="copyToClipboard(document.getElementById('cfm_name').innerText, 'Nazwa klienta')" class="text-xs bg-gray-200 hover:bg-gray-300 px-2 py-1 rounded font-bold" title="Kopiuj nazwę">📋</button>
+                    </div>
+                    <div class="flex items-center gap-2 mt-0.5">
+                        <p class="text-sm font-mono text-textMuted" id="cfm_pesel">PESEL / NIP: -</p>
+                        <button onclick="copyToClipboard(document.getElementById('cfm_pesel').innerText.replace(/[^0-9]/g,''), 'PESEL/NIP')" class="text-xs bg-gray-200 hover:bg-gray-300 px-1.5 py-0.5 rounded font-bold" title="Kopiuj PESEL/NIP">📋</button>
+                    </div>
+                </div>
                 <div class="flex items-center gap-3">
                     <button onclick="addCalendarEvent('client')" class="px-3 py-2 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-sm font-bold">📅 Google Cal</button>
                     <button onclick="toggleCfmEdit()" id="cfm_btnEdit" class="px-4 py-2 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg text-sm font-bold">Edytuj</button>
@@ -327,51 +358,86 @@
             </div>
             <div class="flex-grow overflow-y-auto p-6 bg-white">
                 <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
+                    <!-- Kolumna 1: Dane -->
                     <div class="space-y-4">
                         <h3 class="font-bold text-lg border-b border-luxBorder pb-2 text-goldAccent">Dane Kalkulacyjne / Firmowe</h3>
                         <div id="cfm_viewMode" class="space-y-2.5 text-sm">
-                            <div class="grid grid-cols-2"><span class="text-textMuted">Telefon:</span><span id="cv_phone" class="font-medium">-</span></div>
-                            <div class="grid grid-cols-2"><span class="text-textMuted">E-mail:</span><span id="cv_email" class="font-medium">-</span></div>
+                            <div class="grid grid-cols-2 items-center"><span class="text-textMuted">Telefon:</span><span class="font-medium flex items-center gap-2"><span id="cv_phone">-</span> <button onclick="copyToClipboard(document.getElementById('cv_phone').innerText, 'Telefon')" class="text-[10px] bg-gray-100 hover:bg-gray-200 px-1.5 py-0.5 rounded">📋</button></span></div>
+                            <div class="grid grid-cols-2 items-center"><span class="text-textMuted">E-mail:</span><span class="font-medium flex items-center gap-2"><span id="cv_email">-</span> <button onclick="copyToClipboard(document.getElementById('cv_email').innerText, 'Email')" class="text-[10px] bg-gray-100 hover:bg-gray-200 px-1.5 py-0.5 rounded">📋</button></span></div>
                             <div class="grid grid-cols-2"><span class="text-textMuted">Data ur.:</span><span id="cv_birth" class="font-medium">-</span></div>
-                            <div class="grid grid-cols-2"><span class="text-textMuted">Pr. jazdy:</span><span id="cv_license" class="font-medium text-goldAccent">-</span></div>
+                            <div class="grid grid-cols-2"><span class="text-textMuted">Pr. jazdy od:</span><span id="cv_license" class="font-medium text-goldAccent">-</span></div>
                             <div class="w-full h-px bg-luxBorder my-2"></div>
-                            <div class="grid grid-cols-2"><span class="text-textMuted">NIP:</span><span id="cv_nip" class="font-mono font-medium">-</span></div>
-                            <div class="grid grid-cols-2"><span class="text-textMuted">REGON:</span><span id="cv_regon" class="font-mono font-medium">-</span></div>
+                            <div class="grid grid-cols-2 items-center"><span class="text-textMuted">NIP:</span><span class="font-mono font-medium flex items-center gap-2"><span id="cv_nip">-</span> <button onclick="copyToClipboard(document.getElementById('cv_nip').innerText, 'NIP')" class="text-[10px] bg-gray-100 hover:bg-gray-200 px-1.5 py-0.5 rounded">📋</button></span></div>
+                            <div class="grid grid-cols-2 items-center"><span class="text-textMuted">REGON:</span><span class="font-mono font-medium flex items-center gap-2"><span id="cv_regon">-</span> <button onclick="copyToClipboard(document.getElementById('cv_regon').innerText, 'REGON')" class="text-[10px] bg-gray-100 hover:bg-gray-200 px-1.5 py-0.5 rounded">📋</button></span></div>
                             <div class="w-full h-px bg-luxBorder my-2"></div>
-                            <div class="grid grid-cols-2"><span class="text-textMuted">Adres:</span><span id="cv_address" class="font-medium whitespace-pre-line">-</span></div>
+                            <div class="grid grid-cols-2 items-start"><span class="text-textMuted">Adres:</span><span class="font-medium whitespace-pre-line flex items-start gap-2"><span id="cv_address">-</span> <button onclick="copyToClipboard(document.getElementById('cv_address').innerText, 'Adres')" class="text-[10px] bg-gray-100 hover:bg-gray-200 px-1.5 py-0.5 rounded mt-0.5">📋</button></span></div>
                             <div class="grid grid-cols-2"><span class="text-textMuted">Źródło polecenia:</span><span id="cv_source" class="font-medium">-</span></div>
                         </div>
                         <div id="cfm_editMode" class="space-y-3 text-sm hidden bg-luxBg p-4 rounded-xl border border-luxBorder">
-                            <input type="text" id="ce_name" class="w-full border rounded p-1.5 mb-2" placeholder="Imię / Nazwa">
-                            <div class="grid grid-cols-2 gap-2"><input type="text" id="ce_pesel" maxlength="11" oninput="this.value=this.value.replace(/[^0-9]/g,'')" class="w-full border rounded p-1.5" placeholder="PESEL"><input type="text" id="ce_phone" class="w-full border rounded p-1.5" placeholder="Telefon"></div>
-                            <div class="grid grid-cols-2 gap-2"><input type="text" id="ce_nip" maxlength="10" class="w-full border rounded p-1.5" placeholder="NIP"><input type="text" id="ce_regon" class="w-full border rounded p-1.5" placeholder="REGON"></div>
-                            <input type="email" id="ce_email" class="w-full border rounded p-1.5 mt-2" placeholder="E-mail">
-                            <div class="grid grid-cols-2 gap-2 mt-2"><input type="date" id="ce_birth" class="w-full border rounded p-1.5"><input type="date" id="ce_license" class="w-full border rounded p-1.5"></div>
-                            <textarea id="ce_address" rows="2" class="w-full border rounded p-1.5 mt-2" placeholder="Adres"></textarea>
-                            <input type="text" id="ce_source" class="w-full border rounded p-1.5 mt-2" placeholder="Źródło (np. Polecenie od J.Kowalskiego)">
-                            <button onclick="saveCfmEdits()" class="w-full bg-goldAccent text-white text-sm py-2 rounded-lg font-bold mt-2">Zapisz zmiany</button>
+                            <div><label class="text-[10px] uppercase font-bold text-textMuted">Imię i nazwisko / Nazwa firmy</label><input type="text" id="ce_name" class="w-full border rounded p-1.5 bg-white"></div>
+                            <div class="grid grid-cols-2 gap-2">
+                                <div><label class="text-[10px] uppercase font-bold text-textMuted">PESEL</label><input type="text" id="ce_pesel" maxlength="11" oninput="this.value=this.value.replace(/[^0-9]/g,'')" class="w-full border rounded p-1.5 bg-white"></div>
+                                <div><label class="text-[10px] uppercase font-bold text-textMuted">Telefon</label><input type="text" id="ce_phone" class="w-full border rounded p-1.5 bg-white"></div>
+                            </div>
+                            <div class="grid grid-cols-2 gap-2">
+                                <div><label class="text-[10px] uppercase font-bold text-textMuted">NIP</label><input type="text" id="ce_nip" maxlength="10" class="w-full border rounded p-1.5 bg-white"></div>
+                                <div><label class="text-[10px] uppercase font-bold text-textMuted">REGON</label><input type="text" id="ce_regon" class="w-full border rounded p-1.5 bg-white"></div>
+                            </div>
+                            <div><label class="text-[10px] uppercase font-bold text-textMuted">E-mail</label><input type="email" id="ce_email" class="w-full border rounded p-1.5 bg-white"></div>
+                            <div class="grid grid-cols-2 gap-2">
+                                <div><label class="text-[10px] uppercase font-bold text-textMuted">Data urodzenia</label><input type="date" id="ce_birth" min="1900-01-01" max="2100-12-31" class="w-full border rounded p-1.5 bg-white"></div>
+                                <div><label class="text-[10px] uppercase font-bold text-textMuted">Prawo jazdy od</label><input type="date" id="ce_license" min="1900-01-01" max="2100-12-31" class="w-full border rounded p-1.5 bg-white"></div>
+                            </div>
+                            <div><label class="text-[10px] uppercase font-bold text-textMuted">Adres</label><textarea id="ce_address" rows="2" class="w-full border rounded p-1.5 bg-white"></textarea></div>
+                            <div><label class="text-[10px] uppercase font-bold text-textMuted">Źródło</label><input type="text" id="ce_source" class="w-full border rounded p-1.5 bg-white"></div>
+                            <button type="button" onclick="saveCfmEdits()" class="w-full bg-goldAccent text-white text-sm py-2 rounded-lg font-bold mt-2 hover:bg-goldHover">💾 Zapisz zmiany</button>
                         </div>
                     </div>
+
+                    <!-- Kolumna 2: Garaż (z pełnymi danymi z dowodu i edycją) oraz Lokale -->
                     <div class="space-y-6">
                         <div>
-                            <div class="flex justify-between items-center border-b border-luxBorder pb-2"><h3 class="font-bold text-lg text-textDark">Garaż</h3><button onclick="toggleAddVehicle()" class="text-xs font-bold bg-blue-50 text-blue-700 px-2.5 py-1 rounded">+ Dodaj</button></div>
-                            <div id="cfm_addVehicleBox" class="hidden bg-blue-50 border border-blue-200 p-3 rounded-xl mt-3 space-y-2 text-sm">
+                            <div class="flex justify-between items-center border-b border-luxBorder pb-2">
+                                <h3 class="font-bold text-lg text-textDark">Garaż (Dane z dowodu)</h3>
+                                <button onclick="toggleAddVehicle()" class="text-xs font-bold bg-blue-50 text-blue-700 px-2.5 py-1 rounded hover:bg-blue-100">+ Dodaj pojazd</button>
+                            </div>
+                            <div id="cfm_addVehicleBox" class="hidden bg-blue-50 border border-blue-200 p-3.5 rounded-xl mt-3 space-y-2.5 text-sm">
+                                <p id="v_formTitle" class="text-xs font-bold text-blue-900 uppercase">Nowy Pojazd</p>
                                 <div class="grid grid-cols-2 gap-2">
-                                    <input list="popularBrandsList" id="v_brand" placeholder="Marka" class="w-full border rounded p-1.5 uppercase">
-                                    <input type="text" id="v_model" placeholder="Model" class="w-full border rounded p-1.5">
+                                    <div><label class="text-[10px] font-bold text-textMuted">Marka (wybierz lub wpisz)</label><input list="popularBrandsList" id="v_brand" placeholder="np. Kia" class="w-full border rounded p-1.5 bg-white"></div>
+                                    <div><label class="text-[10px] font-bold text-textMuted">Model</label><input type="text" id="v_model" placeholder="np. Ceed" class="w-full border rounded p-1.5 bg-white"></div>
                                 </div>
-                                <div class="grid grid-cols-2 gap-2"><input type="number" id="v_year" placeholder="Rok" class="w-full border rounded p-1.5"><input type="text" id="v_plate" placeholder="Nr Rej." class="w-full border rounded p-1.5 uppercase"></div>
-                                <div class="grid grid-cols-2 gap-2 mt-1"><input type="text" id="v_vin" placeholder="VIN" maxlength="17" class="w-full border rounded p-1.5 uppercase"><input type="date" id="v_inspection" class="w-full border rounded p-1.5" title="Koniec przeglądu rejestracyjnego"></div>
-                                <div class="mt-2"><label class="text-xs font-bold"><input type="checkbox" id="v_anglik" class="mr-1"> 🇬🇧 Anglik / USA (Trudne ryzyko)</label></div>
-                                <button onclick="saveVehicle()" class="w-full bg-blue-600 text-white font-bold py-1.5 rounded mt-2">Zapisz pojazd</button>
+                                <div class="grid grid-cols-3 gap-2">
+                                    <div><label class="text-[10px] font-bold text-textMuted">Rok prod.</label><input type="number" id="v_year" placeholder="2020" class="w-full border rounded p-1.5 bg-white"></div>
+                                    <div><label class="text-[10px] font-bold text-textMuted">Pojemność (cm³)</label><input type="number" id="v_cap" placeholder="1598" class="w-full border rounded p-1.5 bg-white"></div>
+                                    <div><label class="text-[10px] font-bold text-textMuted">Przebieg (km)</label><input type="number" id="v_mileage" placeholder="85000" class="w-full border rounded p-1.5 bg-white"></div>
+                                </div>
+                                <div class="grid grid-cols-2 gap-2">
+                                    <div><label class="text-[10px] font-bold text-textMuted">Moc (kW) - przelicza KM</label><input type="number" id="v_kw" oninput="calcKmFromKw(this.value)" placeholder="104" class="w-full border rounded p-1.5 bg-white"></div>
+                                    <div><label class="text-[10px] font-bold text-textMuted">Moc (KM)</label><input type="number" id="v_km" oninput="calcKwFromKm(this.value)" placeholder="141" class="w-full border rounded p-1.5 bg-white"></div>
+                                </div>
+                                <div class="grid grid-cols-2 gap-2">
+                                    <div><label class="text-[10px] font-bold text-textMuted">Nr Rejestracyjny</label><input type="text" id="v_plate" placeholder="GKA 12345" class="w-full border rounded p-1.5 uppercase bg-white font-mono"></div>
+                                    <div><label class="text-[10px] font-bold text-textMuted">VIN (17 znaków)</label><input type="text" id="v_vin" placeholder="VIN..." maxlength="17" class="w-full border rounded p-1.5 uppercase bg-white font-mono"></div>
+                                </div>
+                                <div class="grid grid-cols-2 gap-2">
+                                    <div><label class="text-[10px] font-bold text-textMuted">Data I rejestracji</label><input type="date" id="v_firstReg" min="1900-01-01" max="2100-12-31" class="w-full border rounded p-1.5 bg-white"></div>
+                                    <div><label class="text-[10px] font-bold text-textMuted">Koniec przeglądu</label><input type="date" id="v_inspection" min="1900-01-01" max="2100-12-31" class="w-full border rounded p-1.5 bg-white"></div>
+                                </div>
+                                <div class="pt-1"><label class="text-xs font-bold cursor-pointer"><input type="checkbox" id="v_anglik" class="mr-1"> 🇬🇧 Anglik / USA (Trudne ryzyko)</label></div>
+                                <div class="flex gap-2 pt-1">
+                                    <button type="button" onclick="toggleAddVehicle()" class="w-1/3 border border-gray-300 bg-white text-textDark font-bold py-1.5 rounded">Anuluj</button>
+                                    <button type="button" onclick="saveVehicle()" class="w-2/3 bg-blue-600 text-white font-bold py-1.5 rounded hover:bg-blue-700">💾 Zapisz pojazd</button>
+                                </div>
                             </div>
                             <div id="cfm_vehiclesList" class="space-y-3 mt-3"></div>
                         </div>
+
                         <div>
                             <div class="flex justify-between items-center border-b border-luxBorder pb-2"><h3 class="font-bold text-lg text-textDark">Lokale</h3><button onclick="toggleAddProperty()" class="text-xs font-bold bg-green-50 text-green-700 px-2.5 py-1 rounded">+ Dodaj</button></div>
                             <div id="cfm_addPropertyBox" class="hidden bg-green-50 border border-green-200 p-3 rounded-xl mt-3 space-y-2 text-sm">
-                                <select id="prop_type" class="w-full border rounded p-1.5"><option>Mieszkanie</option><option>Dom</option><option>Firma</option></select>
-                                <input type="text" id="prop_address" placeholder="Adres nieruchomości" class="w-full border rounded p-1.5 mt-1">
+                                <select id="prop_type" class="w-full border rounded p-1.5 bg-white"><option>Mieszkanie</option><option>Dom</option><option>Firma</option></select>
+                                <input type="text" id="prop_address" placeholder="Adres nieruchomości" class="w-full border rounded p-1.5 mt-1 bg-white">
                                 <div class="mt-2 space-y-1">
                                     <label class="text-xs font-bold block"><input type="checkbox" id="prop_flammable" class="mr-1"> 🔥 Konstrukcja Palna (Drewno)</label>
                                     <label class="text-xs font-bold block"><input type="checkbox" id="prop_flood" class="mr-1"> 🌊 Teren Zalewowy</label>
@@ -381,14 +447,16 @@
                             <div id="cfm_propertiesList" class="space-y-3 mt-3"></div>
                         </div>
                     </div>
+
+                    <!-- Kolumna 3: Polisy -->
                     <div class="space-y-6">
                         <div class="flex justify-between items-center border-b border-luxBorder pb-2"><h3 class="font-bold text-lg text-textDark">Historia Polis</h3><button onclick="openPolicyModal(null, currentOpenId)" class="text-xs font-bold bg-goldAccent text-white px-2.5 py-1 rounded">+ Nowa Polisa</button></div>
                         <div id="cfm_policiesList" class="space-y-3 mt-3"></div>
                         
                         <div class="border-b border-luxBorder pb-2 mt-8"><h3 class="font-bold text-lg text-textDark">Obce Polisy (Do przejęcia)</h3></div>
                         <div id="cfm_externalPoliciesBox" class="bg-gray-50 border p-3 rounded-xl mt-3 space-y-2 text-sm">
-                            <input type="text" id="ext_subject" placeholder="Czego dotyczy (np. PZU Dom)" class="w-full border rounded p-1.5">
-                            <div class="flex gap-2"><input type="date" id="ext_date" class="w-full border rounded p-1.5"><button onclick="saveExternalPolicy()" class="bg-gray-800 text-white px-3 rounded font-bold">Zapisz</button></div>
+                            <input type="text" id="ext_subject" placeholder="Czego dotyczy (np. PZU Dom)" class="w-full border rounded p-1.5 bg-white">
+                            <div class="flex gap-2"><input type="date" id="ext_date" min="1900-01-01" max="2100-12-31" class="w-full border rounded p-1.5 bg-white"><button onclick="saveExternalPolicy()" class="bg-gray-800 text-white px-3 rounded font-bold">Zapisz</button></div>
                         </div>
                         <div id="cfm_externalList" class="space-y-2 mt-3"></div>
 
@@ -399,29 +467,58 @@
         </div>
     </div>
 
-    <!-- DRAWER: PODGLĄD POLISY -->
+    <!-- SZUFLADA POLISY (Z ręczną edycją prowizji i notatką) -->
     <div id="policyDrawerOverlay" class="fixed inset-0 bg-black/20 backdrop-blur-sm z-50 hidden transition-opacity" onclick="closeDrawer('policy')"></div>
     <div id="policyDrawer" class="fixed top-0 right-0 h-full w-full max-w-md bg-luxCard shadow-2xl z-50 drawer-closed transition-transform duration-300 flex flex-col border-l border-luxBorder">
         <div class="p-6 border-b border-luxBorder bg-luxBg/50 relative">
             <button onclick="closeDrawer('policy')" class="absolute top-4 right-4 text-textMuted font-bold text-xl">&times;</button>
             <span id="pd_insurer" class="text-xs font-bold text-goldAccent uppercase block mt-2">-</span>
-            <h2 id="pd_type" class="text-2xl font-bold text-textDark mt-1">-</h2><p id="pd_number" class="text-sm font-mono text-textMuted mt-1">Nr: -</p>
+            <div class="flex items-center gap-2 mt-1">
+                <h2 id="pd_type" class="text-2xl font-bold text-textDark">-</h2>
+                <button onclick="copyToClipboard(document.getElementById('pd_number').innerText.replace('Nr: ',''), 'Numer polisy')" class="text-xs bg-gray-200 hover:bg-gray-300 px-2 py-1 rounded font-bold">📋 Kopiuj nr</button>
+            </div>
+            <p id="pd_number" class="text-sm font-mono text-textMuted mt-1">Nr: -</p>
             <div class="flex gap-3 mt-5">
                 <button onclick="clonePolicyToRenewal()" class="flex-1 bg-green-50 text-green-700 border border-green-200 py-2 rounded-xl text-sm font-bold">🔄 Wznów (Klonuj)</button>
-                <button onclick="openPolicyModal(currentOpenPolicyId)" class="flex-1 text-center py-2 bg-white border border-luxBorder rounded-xl text-sm font-medium">✏️ Edytuj</button>
+                <button onclick="openPolicyModal(currentOpenPolicyId)" class="flex-1 text-center py-2 bg-white border border-luxBorder rounded-xl text-sm font-medium">✏️ Edytuj całość</button>
             </div>
         </div>
         <div class="p-6 flex-grow overflow-y-auto space-y-6 flex flex-col justify-between">
             <div>
-                <h3 class="font-bold text-lg border-b border-luxBorder pb-1 mb-3">Szczegóły</h3>
+                <h3 class="font-bold text-lg border-b border-luxBorder pb-1 mb-3">Szczegóły i Rozliczenie</h3>
                 <div class="space-y-3 text-sm">
                     <div class="grid grid-cols-3"><span class="text-textMuted">Klient:</span><span id="pd_clientName" class="col-span-2 font-medium text-goldAccent cursor-pointer hover:underline"></span></div>
                     <div class="grid grid-cols-3"><span class="text-textMuted">Przedmiot:</span><span id="pd_subject" class="col-span-2 font-medium">-</span></div>
                     <div class="grid grid-cols-3"><span class="text-textMuted">Okres:</span><span class="col-span-2 font-medium"><span id="pd_start"></span> do <span id="pd_end" class="font-bold text-red-500"></span></span></div>
+                    <div class="grid grid-cols-3 items-center">
+                        <span class="text-textMuted font-bold">Status TU:</span>
+                        <span class="col-span-2">
+                            <select id="pd_settlementStatus" onchange="updatePolicySettlement(this.value)" class="w-full border border-luxBorder rounded-lg p-1.5 text-xs font-bold bg-white">
+                                <option value="nierozliczona">⏳ Nierozliczona z TU</option>
+                                <option value="rozliczona">✅ Rozliczona z TU (Wypłacona)</option>
+                                <option value="anulowana">❌ Wypowiedziana / Sprzedaż auta (Zamyka raty)</option>
+                            </select>
+                        </span>
+                    </div>
                 </div>
-                <h3 class="font-bold text-lg border-b border-luxBorder pb-1 mb-3 mt-6">Ryzyka i Finanse</h3>
+
+                <h3 class="font-bold text-lg border-b border-luxBorder pb-1 mb-3 mt-6">Ryzyka i Prowizja (Ręczna korekta)</h3>
                 <div id="pd_risksList" class="space-y-2 text-sm bg-gray-50 border p-3 rounded-xl mb-4"></div>
-                <div class="space-y-2 text-sm bg-luxBg p-3 rounded-xl border"><div class="grid grid-cols-3"><span class="text-textMuted">Składka:</span><span id="pd_premium" class="col-span-2 font-bold">-</span></div><div class="grid grid-cols-3"><span class="text-textMuted">Prowizja:</span><span id="pd_comm" class="col-span-2 font-semibold text-green-700">-</span></div></div>
+                
+                <div class="space-y-2.5 text-sm bg-luxBg p-3.5 rounded-xl border border-luxBorder">
+                    <div class="flex justify-between items-center"><span class="text-textMuted">Składka przypisana:</span><span id="pd_premium" class="font-bold">-</span></div>
+                    <div class="border-t border-luxBorder pt-2">
+                        <label class="text-[10px] uppercase font-bold text-green-800 block mb-1">Ostateczna Prowizja do statystyk (PLN):</label>
+                        <div class="flex gap-2">
+                            <input type="number" step="0.01" id="pd_commInput" class="w-full border border-green-300 bg-white p-1.5 rounded-lg text-sm font-bold text-green-700">
+                            <button onclick="saveDrawerCommissionOverride()" class="bg-green-600 hover:bg-green-700 text-white text-xs font-bold px-3 rounded-lg">Zapisz</button>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="text-[10px] uppercase font-bold text-textMuted block mb-1">Notatka do prowizji / rozliczenia:</label>
+                        <input type="text" id="pd_commNoteInput" onchange="saveDrawerCommissionOverride()" placeholder="np. Korekta z rachunku TU -12 zł" class="w-full border border-luxBorder bg-white p-1.5 rounded-lg text-xs">
+                    </div>
+                </div>
                 
                 <div id="pd_tasksBox" class="mt-4 p-4 bg-red-50 rounded-xl border border-red-200 hidden">
                     <p class="text-xs font-bold text-red-800 uppercase border-b border-red-200 pb-1 mb-2">Zadania Po-Polisowe</p>
@@ -430,7 +527,7 @@
                 </div>
 
                 <div id="pd_installmentsBox" class="mt-4 p-4 bg-amber-50 rounded-xl border border-amber-200 hidden">
-                    <p class="text-xs font-bold text-amber-800 uppercase border-b border-amber-200 pb-1 mb-3">Harmonogram Rat</p>
+                    <p class="text-xs font-bold text-amber-800 uppercase border-b border-amber-200 pb-1 mb-3">Harmonogram Rat (Odznaczaj opłacone)</p>
                     <div id="pd_installmentsList" class="space-y-3 text-sm"></div>
                 </div>
             </div>
@@ -438,17 +535,17 @@
         </div>
     </div>
 
-    <!-- MODAL: KREATOR POLISY (Poprawiony Krok 1, Krok 3 z osobną marką, Krok 4 z dodawaniem ryzyk) -->
+    <!-- KREATOR POLISY -->
     <div id="policyModal" class="fixed inset-0 bg-black/40 backdrop-blur-sm hidden items-center justify-center z-50 p-4">
         <div class="lux-card rounded-2xl p-6 w-full max-w-xl bg-white shadow-xl relative max-h-[95vh] overflow-y-auto">
             <button onclick="closePolicyModal()" class="absolute top-4 right-4 text-textMuted font-bold text-xl">&times;</button>
             <h3 id="policyModalTitle" class="font-bold text-lg mb-1">Dodaj nową polisę</h3>
             <p id="policyStepIndicator" class="text-xs text-textMuted mb-5">Krok 1 z 4</p>
 
-            <!-- KROK 1: Wybór Klienta (Bez zapamiętywania na stałe) -->
+            <!-- KROK 1 (Czytelna obsługa PESEL i NIP firmy) -->
             <div id="pStep1" class="space-y-4">
                 <div>
-                    <label class="text-xs font-semibold text-textMuted">Wpisz PESEL (11) lub NIP (10) klienta</label>
+                    <label class="text-xs font-semibold text-textMuted">Wpisz PESEL (11 cyfr) lub NIP firmy (10 cyfr)</label>
                     <input type="text" id="p_peselInput" maxlength="11" oninput="handlePolicyPeselInput(this)" class="w-full border p-2.5 rounded-xl text-sm mt-1 outline-none font-mono focus:border-goldAccent" placeholder="Wpisz lub wklej PESEL/NIP...">
                 </div>
                 
@@ -460,21 +557,31 @@
                             <p id="p_clientFoundName" class="text-sm font-bold text-textDark">-</p>
                         </div>
                     </div>
-                    <button onclick="resetPolicyClientChoice()" class="text-xs text-red-600 font-bold hover:underline">Zmień</button>
+                    <button type="button" onclick="resetPolicyClientChoice()" class="text-xs text-red-600 font-bold hover:underline">Zmień</button>
                 </div>
 
                 <div id="p_clientNotFoundBox" class="hidden p-4 bg-amber-50 border border-amber-200 rounded-xl space-y-3">
-                    <p class="text-xs font-bold text-amber-800">Nie znaleziono w bazie. Wpisz imię i nazwisko, aby utworzyć klienta w locie:</p>
-                    <input type="text" id="p_quickName" placeholder="Imię i nazwisko / Firma" class="w-full border p-2 rounded-lg text-sm bg-white">
-                    <div class="grid grid-cols-2 gap-2">
-                        <input type="date" id="p_quickBirth" class="border p-2 rounded-lg text-sm bg-white" title="Data urodzenia">
-                        <input type="date" id="p_quickLicense" class="border p-2 rounded-lg text-sm bg-white" title="Data wydania prawa jazdy">
+                    <p id="p_quickBoxHeader" class="text-xs font-bold text-amber-900">Nie znaleziono w bazie. Utwórz klienta w locie:</p>
+                    <div>
+                        <label id="p_quickNameLabel" class="text-[10px] uppercase font-bold text-amber-800 block mb-1">Imię i nazwisko / Nazwa firmy</label>
+                        <input type="text" id="p_quickName" placeholder="np. RENT AND GO DAMIAN KOSMOWSKI" class="w-full border p-2 rounded-lg text-sm bg-white font-semibold">
                     </div>
-                    <button onclick="saveQuickClientFromPolicy()" class="w-full bg-amber-700 text-white font-bold py-2 rounded-lg text-xs hover:bg-amber-800">Zapisz i kontynuuj</button>
+                    <!-- Pola widoczne tylko dla osoby fizycznej (PESEL) -->
+                    <div id="p_quickDatesBox" class="grid grid-cols-2 gap-2">
+                        <div>
+                            <label class="text-[10px] uppercase font-bold text-amber-800 block mb-1">Data urodzenia (Opcjonalnie)</label>
+                            <input type="date" id="p_quickBirth" min="1900-01-01" max="2100-12-31" class="w-full border p-2 rounded-lg text-sm bg-white">
+                        </div>
+                        <div>
+                            <label class="text-[10px] uppercase font-bold text-amber-800 block mb-1">Prawo jazdy od (Opcjonalnie)</label>
+                            <input type="date" id="p_quickLicense" min="1900-01-01" max="2100-12-31" class="w-full border p-2 rounded-lg text-sm bg-white">
+                        </div>
+                    </div>
+                    <button type="button" onclick="saveQuickClientFromPolicy()" class="w-full bg-amber-700 text-white font-bold py-2.5 rounded-lg text-xs hover:bg-amber-800 shadow-sm">Zapisz klienta i przejdź dalej</button>
                 </div>
             </div>
 
-            <!-- KROK 2: TU i Okres -->
+            <!-- KROK 2 -->
             <div id="pStep2" class="space-y-4 hidden">
                 <div class="flex gap-4 p-3 bg-blue-50 border border-blue-200 rounded-xl mb-4">
                     <label class="flex items-center text-sm font-bold cursor-pointer"><input type="radio" name="p_salesType" value="new" checked class="mr-2 accent-indigo-600"> Nowy Biznes</label>
@@ -494,36 +601,45 @@
                 </div>
                 <div><label class="text-xs font-semibold text-textMuted">Nr Polisy</label><input type="text" id="p_number" class="w-full border p-2 rounded-xl text-sm mt-1 uppercase"></div>
                 <div class="grid grid-cols-2 gap-3">
-                    <div><label class="text-xs font-semibold text-textMuted">Początek</label><input type="date" id="p_dateStart" onchange="autoFillEndDate(this.value)" class="w-full border p-2 rounded-xl text-sm mt-1"></div>
-                    <div><label class="text-xs font-semibold text-textMuted">Koniec</label><input type="date" id="p_dateEnd" class="w-full border p-2 rounded-xl text-sm mt-1"></div>
+                    <div><label class="text-xs font-semibold text-textMuted">Początek ochrony</label><input type="date" id="p_dateStart" min="1900-01-01" max="2100-12-31" onchange="autoFillEndDate(this.value)" class="w-full border p-2 rounded-xl text-sm mt-1"></div>
+                    <div><label class="text-xs font-semibold text-textMuted">Koniec ochrony</label><input type="date" id="p_dateEnd" min="1900-01-01" max="2100-12-31" class="w-full border p-2 rounded-xl text-sm mt-1"></div>
                 </div>
             </div>
 
-            <!-- KROK 3: Przedmiot z osobną Marką i Model -->
+            <!-- KROK 3 (Z wyborem pojazdu z garażu lub wpisaniem nowego) -->
             <div id="pStep3" class="space-y-4 hidden">
-                <!-- Sekcja Komunikacja -->
                 <div id="p_vehicleSection" class="space-y-3 bg-blue-50/50 p-4 rounded-xl border border-blue-200">
-                    <h4 class="text-xs font-bold text-blue-900 uppercase">Dane Pojazdu</h4>
+                    <div class="flex justify-between items-center">
+                        <h4 class="text-xs font-bold text-blue-900 uppercase">Dane Pojazdu</h4>
+                        <select id="p_garageSelect" onchange="fillVehicleFromGarage(this.value)" class="border border-blue-300 rounded-lg px-2 py-1 text-xs bg-white font-semibold text-blue-900">
+                            <option value="">-- Wybierz z garażu klienta --</option>
+                        </select>
+                    </div>
                     <div class="grid grid-cols-2 gap-2">
                         <div>
-                            <label class="text-[10px] uppercase font-bold text-textMuted">Marka</label>
-                            <input list="popularBrandsList" id="p_carBrand" oninput="assembleSubjectString()" placeholder="Wybierz lub wpisz markę" class="w-full border p-2 rounded-lg text-sm bg-white uppercase">
+                            <label class="text-[10px] uppercase font-bold text-textMuted">Marka (wybierz lub wpisz nową)</label>
+                            <input list="popularBrandsList" id="p_carBrand" oninput="assembleSubjectString()" placeholder="np. Toyota" class="w-full border p-2 rounded-lg text-sm bg-white">
                         </div>
                         <div>
                             <label class="text-[10px] uppercase font-bold text-textMuted">Model</label>
-                            <input type="text" id="p_carModel" oninput="assembleSubjectString()" placeholder="np. Golf VII / Ceed" class="w-full border p-2 rounded-lg text-sm bg-white">
+                            <input type="text" id="p_carModel" oninput="assembleSubjectString()" placeholder="np. Corolla" class="w-full border p-2 rounded-lg text-sm bg-white">
                         </div>
                     </div>
-                    <div>
-                        <label class="text-[10px] uppercase font-bold text-textMuted">Nr Rejestracyjny</label>
-                        <input type="text" id="p_carPlate" oninput="assembleSubjectString()" placeholder="np. GKA12345" class="w-full border p-2 rounded-lg text-sm bg-white uppercase font-mono">
+                    <div class="grid grid-cols-2 gap-2">
+                        <div>
+                            <label class="text-[10px] uppercase font-bold text-textMuted">Nr Rejestracyjny</label>
+                            <input type="text" id="p_carPlate" oninput="assembleSubjectString()" placeholder="np. GKA12345" class="w-full border p-2 rounded-lg text-sm bg-white uppercase font-mono">
+                        </div>
+                        <div>
+                            <label class="text-[10px] uppercase font-bold text-textMuted">VIN (Zapisze się do Garażu)</label>
+                            <input type="text" id="p_carVin" maxlength="17" placeholder="Opcjonalnie VIN..." class="w-full border p-2 rounded-lg text-sm bg-white uppercase font-mono">
+                        </div>
                     </div>
                 </div>
 
-                <!-- Sekcja Ogólna / Majątek -->
                 <div id="p_generalSection" class="space-y-2 hidden">
-                    <label class="text-xs font-bold text-textDark block">Przedmiot Ubezpieczenia (adres lokalu / mienie)</label>
-                    <input type="text" id="p_homeAddress" oninput="assembleSubjectString()" placeholder="np. Dom jednorodzinny, Gdańsk ul. Długa 1" class="w-full border p-2 rounded-xl text-sm bg-white">
+                    <label class="text-xs font-bold text-textDark block">Przedmiot Ubezpieczenia (adres lokalu / opis)</label>
+                    <input type="text" id="p_homeAddress" oninput="assembleSubjectString()" placeholder="np. Dom jednorodzinny, Gdańsk" class="w-full border p-2 rounded-xl text-sm bg-white">
                 </div>
 
                 <div class="bg-red-50 p-3 border border-red-200 rounded-xl space-y-2">
@@ -533,14 +649,14 @@
                 </div>
             </div>
 
-            <!-- KROK 4: Ryzyka i Płatność (Odblokowane dodawanie ryzyk) -->
+            <!-- KROK 4 (Z ręcznym nadpisywaniem prowizji, notatką oraz ratami 1, 2, 4, 6, 12) -->
             <div id="pStep4" class="space-y-4 hidden">
                 <div class="bg-gray-50 border border-gray-200 rounded-xl p-4">
-                    <h4 class="font-bold text-sm text-textDark mb-3">🛡️ Dodaj Ryzyka do Polisy</h4>
+                    <h4 class="font-bold text-sm text-textDark mb-3">🛡️ Kalkulator Ryzyk (Pomocniczy)</h4>
                     <div class="grid grid-cols-12 gap-2 items-end mb-3">
                         <div class="col-span-5">
                             <label class="text-[10px] uppercase font-bold text-textMuted">Nazwa ryzyka</label>
-                            <input list="riskDatalist" id="p_riskNameInput" oninput="checkRiskDictForAutoFill()" placeholder="OC / AC / NNW..." class="w-full border rounded p-2 text-sm uppercase bg-white">
+                            <input list="riskDatalist" id="p_riskNameInput" oninput="checkRiskDictForAutoFill()" placeholder="OC / AC..." class="w-full border rounded p-2 text-sm uppercase bg-white">
                             <datalist id="riskDatalist"></datalist>
                         </div>
                         <div class="col-span-3">
@@ -555,57 +671,62 @@
                             <button type="button" onclick="addRiskToTemp()" class="w-full bg-textDark text-white font-bold text-sm py-2 rounded hover:bg-black transition-colors">+ Dodaj</button>
                         </div>
                     </div>
-                    <div id="p_tempRisksList" class="space-y-2 mt-2 max-h-32 overflow-y-auto"></div>
+                    <div id="p_tempRisksList" class="space-y-2 mt-2 max-h-28 overflow-y-auto"></div>
                 </div>
 
-                <div class="grid grid-cols-2 gap-3 p-3 bg-luxBg rounded-xl border border-luxBorder">
-                    <div><label class="text-xs font-semibold text-textMuted">Składka Całkowita</label><input type="number" id="p_premium" readonly class="w-full border bg-gray-100 p-2 rounded-xl text-sm font-bold"></div>
-                    <div><label class="text-xs font-semibold text-textMuted">Prowizja Całkowita</label><input type="text" id="p_commValue" readonly class="w-full border bg-green-50 p-2 rounded-xl text-sm font-bold text-green-700"></div>
+                <!-- Główne pola finansowe (Edytowalne z ręki!) -->
+                <div class="p-3.5 bg-green-50/70 rounded-xl border border-green-300 space-y-3">
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="text-xs font-bold text-textDark">Składka Całkowita (PLN)</label>
+                            <input type="number" step="0.01" id="p_premium" oninput="calcInstallmentsOnly()" class="w-full border border-gray-300 bg-white p-2 rounded-xl text-sm font-bold mt-1" placeholder="Możesz wpisać z ręki">
+                        </div>
+                        <div>
+                            <div class="flex justify-between items-center">
+                                <label class="text-xs font-bold text-green-900">Prowizja do statystyk (PLN)</label>
+                                <span id="p_commManualBadge" class="hidden text-[9px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded font-bold uppercase">Ręczna</span>
+                            </div>
+                            <input type="number" step="0.01" id="p_commValue" oninput="markCommissionAsManual()" class="w-full border-2 border-green-500 bg-white p-2 rounded-xl text-sm font-extrabold text-green-700 mt-1" placeholder="Wpisz lub przelicz wyżej">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="text-[10px] uppercase font-bold text-textMuted">Notatka do prowizji / rozliczenia (Opcjonalnie)</label>
+                        <input type="text" id="p_commNote" placeholder="np. Kwota wpisana z rachunku TU / Inna stawka" class="w-full border border-gray-300 bg-white p-1.5 rounded-lg text-xs mt-0.5">
+                    </div>
                 </div>
+
                 <div class="grid grid-cols-2 gap-3">
-                    <div><label class="text-xs font-semibold text-textMuted">Liczba rat</label><select id="p_installments" onchange="calcInstallmentsOnly()" class="w-full border p-2 rounded-xl text-sm bg-white"><option value="1">1</option><option value="2">2</option><option value="4">4</option></select></div>
-                    <div><label class="text-xs font-semibold text-textMuted">Termin I raty</label><input type="date" id="p_firstPaymentDate" onchange="calcInstallmentsOnly()" class="w-full border p-2 rounded-xl text-sm"></div>
+                    <div>
+                        <label class="text-xs font-semibold text-textMuted">Liczba rat</label>
+                        <select id="p_installments" onchange="calcInstallmentsOnly()" class="w-full border p-2 rounded-xl text-sm bg-white font-semibold">
+                            <option value="1">1 (Jednorazowo)</option>
+                            <option value="2">2 raty (Półroczne)</option>
+                            <option value="4">4 raty (Kwartalne)</option>
+                            <option value="6">6 rat (Co 2 miesiące)</option>
+                            <option value="12">12 rat (Miesięczne)</option>
+                        </select>
+                    </div>
+                    <div><label class="text-xs font-semibold text-textMuted">Termin I raty / Płatności</label><input type="date" id="p_firstPaymentDate" min="1900-01-01" max="2100-12-31" onchange="calcInstallmentsOnly()" class="w-full border p-2 rounded-xl text-sm"></div>
                 </div>
                 <div id="p_installmentsContainer" class="hidden space-y-2 p-3 bg-amber-50 rounded-xl border border-amber-200">
-                    <p class="text-xs font-bold text-amber-800">Harmonogram rat</p>
-                    <div id="p_installmentsList" class="space-y-2"></div>
+                    <p class="text-xs font-bold text-amber-800">Harmonogram kolejnych rat</p>
+                    <div id="p_installmentsList" class="space-y-2 max-h-40 overflow-y-auto pr-1"></div>
                 </div>
             </div>
 
             <div class="flex justify-between mt-6 pt-4 border-t border-luxBorder">
-                <button id="p_btnPrev" onclick="policyStep(-1)" class="px-4 py-2 border rounded-lg text-sm hidden font-semibold">Wstecz</button>
+                <button type="button" id="p_btnPrev" onclick="policyStep(-1)" class="px-4 py-2 border rounded-lg text-sm hidden font-semibold">Wstecz</button>
                 <div class="flex-grow"></div>
-                <button id="p_btnNext" onclick="policyStep(1)" class="px-6 py-2 bg-textDark text-white rounded-lg text-sm font-bold disabled:opacity-40" disabled>Dalej</button>
-                <button id="p_btnSave" onclick="savePolicy()" class="px-6 py-2 bg-goldAccent text-white rounded-lg text-sm font-bold hidden hover:bg-goldHover">Zapisz polisę</button>
+                <button type="button" id="p_btnNext" onclick="policyStep(1)" class="px-6 py-2 bg-textDark text-white rounded-lg text-sm font-bold disabled:opacity-40" disabled>Dalej</button>
+                <button type="button" id="p_btnSave" onclick="savePolicy()" class="px-6 py-2 bg-goldAccent text-white rounded-lg text-sm font-bold hidden hover:bg-goldHover">Zapisz polisę</button>
             </div>
         </div>
     </div>
 
-    <!-- DATALIST MARKI POJAZDÓW (Najpopularniejsze na polskim rynku) -->
-    <datalist id="popularBrandsList">
-        <option value="Audi">
-        <option value="BMW">
-        <option value="Citroen">
-        <option value="Dacia">
-        <option value="Fiat">
-        <option value="Ford">
-        <option value="Honda">
-        <option value="Hyundai">
-        <option value="Kia">
-        <option value="Mazda">
-        <option value="Mercedes-Benz">
-        <option value="Nissan">
-        <option value="Opel">
-        <option value="Peugeot">
-        <option value="Renault">
-        <option value="Seat">
-        <option value="Skoda">
-        <option value="Toyota">
-        <option value="Volkswagen">
-        <option value="Volvo">
-    </datalist>
+    <!-- DATALIST MAREK -->
+    <datalist id="popularBrandsList"></datalist>
 
-    <!-- MODAL: KREATOR OFERT -->
+    <!-- KREATOR OFERT -->
     <div id="offerModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4 transition-opacity" onclick="if(event.target === this) closeOfferModal()">
         <div class="lux-card rounded-2xl p-6 w-full max-w-4xl bg-white shadow-xl relative max-h-[95vh] flex flex-col" onclick="event.stopPropagation()">
             <div class="flex justify-between items-center border-b border-luxBorder pb-4 mb-4">
@@ -624,14 +745,14 @@
                 <div id="offerSetupArea" class="grid grid-cols-1 md:grid-cols-2 gap-3 bg-luxBg p-4 rounded-xl border border-luxBorder">
                     <div><label class="text-xs font-bold block mb-1">Klient</label><select id="off_clientSelect" onchange="updateOfferClientName()" class="w-full border p-2 rounded-lg text-sm bg-white font-semibold"></select></div>
                     <div><label class="text-xs font-bold block mb-1">Typ Oferty</label><input type="text" id="off_typeSelect" value="Majątek (Dom/Mieszkanie)" class="w-full border p-2 rounded-lg text-sm bg-white font-semibold"></div>
-                    <div class="md:col-span-2"><label class="text-xs font-bold block mb-1">Przedmiot Ubezpieczenia (Tylko dane do oferty)</label><input type="text" id="off_subjectInput" placeholder="np. Mieszkanie 60m2" class="w-full border p-2 rounded-lg text-sm bg-white"></div>
+                    <div class="md:col-span-2"><label class="text-xs font-bold block mb-1">Przedmiot Ubezpieczenia</label><input type="text" id="off_subjectInput" placeholder="np. Mieszkanie 60m2" class="w-full border p-2 rounded-lg text-sm bg-white"></div>
                 </div>
                 
                 <div id="offerFormArea" class="bg-indigo-50 border border-indigo-200 rounded-xl p-4">
                     <div class="flex justify-between items-center mb-2"><h4 class="font-bold text-xs uppercase text-indigo-900">Dodaj wariant TU</h4><button onclick="copyAIPrompt()" class="text-[10px] bg-indigo-600 text-white px-2 py-1 rounded font-bold">🤖 Generuj Prompt dla AI</button></div>
                     <div class="grid grid-cols-12 gap-2 items-end">
                         <div class="col-span-12 sm:col-span-3"><select id="off_tu" class="w-full border p-2 rounded-lg text-sm bg-white"></select></div>
-                        <div class="col-span-12 sm:col-span-5"><input type="text" id="off_risks" placeholder="Zakres (np. Mury 500k)" class="w-full border p-2 rounded-lg text-sm bg-white"></div>
+                        <div class="col-span-12 sm:col-span-5"><input type="text" id="off_risks" placeholder="Zakres" class="w-full border p-2 rounded-lg text-sm bg-white"></div>
                         <div class="col-span-6 sm:col-span-2"><input type="text" id="off_rata" placeholder="I Rata" class="w-full border p-2 rounded-lg text-sm bg-white"></div>
                         <div class="col-span-6 sm:col-span-2"><input type="number" id="off_prem" placeholder="Składka(PLN)" class="w-full border p-2 rounded-lg text-sm font-bold bg-white"></div>
                         <div class="col-span-12 mt-2 flex gap-2">
@@ -651,8 +772,8 @@
                 </div>
 
                 <div id="offerRecommendationArea" class="mt-4">
-                    <label class="text-xs font-bold block mb-1">Rekomendacja / Wiadomość dla klienta (Wklej tu odpowiedź od AI):</label>
-                    <textarea id="off_recommendationText" rows="3" class="w-full border border-luxBorder rounded-xl p-3 text-sm outline-none focus:border-goldAccent" placeholder="Panie Janie, przesyłam zestawienie..."></textarea>
+                    <label class="text-xs font-bold block mb-1">Rekomendacja / Wiadomość dla klienta:</label>
+                    <textarea id="off_recommendationText" rows="3" class="w-full border border-luxBorder rounded-xl p-3 text-sm outline-none focus:border-goldAccent" placeholder="Panie Janie..."></textarea>
                 </div>
             </div>
             
@@ -674,7 +795,6 @@
         </div>
     </div>
 
-    <!-- SKRYPTY ZEWNĘTRZNE -->
     <script src="firebase-config.js"></script>
     <script src="ui.js"></script>
     <script src="app.js"></script>
