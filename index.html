@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent 1.0 Pro - CRM dla Agenta</title>
+    
+    <!-- Zewnętrzne biblioteki -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    
+    <!-- Konfiguracja wyglądu (Tailwind) -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        luxBg: '#f8f9fc', luxCard: '#ffffff', luxBorder: '#e2e8f0',
+                        goldAccent: '#b8973b', goldHover: '#9a7c2f', textDark: '#1e293b', textMuted: '#64748b'
+                    }
+                }
+            }
+        }
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Plus Jakarta Sans', sans-serif; overflow-x: hidden; }
+        .lux-card { background: #ffffff; border: 1px solid #e2e8f0; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.02); }
+        .drawer-open { transform: translateX(0); } 
+        .drawer-closed { transform: translateX(100%); }
+        .modal-fullscreen { width: 95vw; max-width: 1400px; height: 90vh; }
+        #loginScreen { backdrop-filter: blur(10px); }
+    </style>
+</head>
+<body class="bg-luxBg text-textDark min-h-screen flex flex-col relative">
+
+    <!-- 1. EKRAN LOGOWANIA -->
+    <div id="loginScreen" class="fixed inset-0 bg-luxBg/95 z-[100] flex items-center justify-center transition-opacity">
+        <div class="lux-card rounded-3xl p-8 w-full max-w-md text-center shadow-2xl border border-goldAccent/30 relative overflow-hidden">
+            <div class="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-goldAccent to-amber-900"></div>
+            <div class="w-16 h-16 rounded-2xl bg-gradient-to-br from-goldAccent to-amber-800 mx-auto flex items-center justify-center text-white font-bold text-3xl shadow-md mb-4">A</div>
+            <h1 class="text-2xl font-bold tracking-wide mb-1">Agent <span class="text-goldAccent">1.0 Pro</span></h1>
+            <p class="text-sm text-textMuted mb-8">Zaloguj się do chmury Firebase</p>
+            <div class="space-y-4 text-left">
+                <div>
+                    <label class="text-xs font-bold text-textMuted uppercase ml-1">E-mail</label>
+                    <input type="email" id="loginEmail" class="w-full border border-luxBorder rounded-xl p-3 mt-1 outline-none focus:border-goldAccent" placeholder="adres@email.pl">
+                </div>
+                <div>
+                    <label class="text-xs font-bold text-textMuted uppercase ml-1">Hasło</label>
+                    <input type="password" id="loginPass" class="w-full border border-luxBorder rounded-xl p-3 mt-1 outline-none focus:border-goldAccent" placeholder="••••••••">
+                </div>
+                <button onclick="doLogin()" class="w-full bg-textDark text-white font-bold py-3 rounded-xl mt-4 hover:bg-gray-800 shadow-lg transition-colors">Zaloguj się</button>
+            </div>
+            <p id="loginError" class="text-red-500 text-xs mt-4 font-bold hidden"></p>
+        </div>
+    </div>
+
+    <!-- 2. GŁÓWNY NAGŁÓWEK (Ukryty przed zalogowaniem) -->
+    <header class="border-b border-luxBorder bg-luxCard/90 backdrop-blur-md sticky top-0 z-40 hidden" id="mainHeader">
+        <div class="max-w-7xl mx-auto px-4 py-3.5 flex flex-col lg:flex-row justify-between items-center gap-4">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-goldAccent to-amber-800 flex items-center justify-center text-white font-bold text-xl shadow-md">A</div>
+                <div>
+                    <h1 class="text-xl font-bold tracking-wide leading-tight">Agent <span class="text-goldAccent">1.0 Pro</span></h1>
+                    <p class="text-[10px] text-textMuted font-bold flex items-center gap-1">Zalogowany <button onclick="doLogout()" class="text-red-500 hover:underline ml-2">Wyloguj</button></p>
+                </div>
+            </div>
+            
+            <div class="w-full lg:w-96 relative">
+                <input type="text" id="globalSearch" oninput="handleGlobalSearch(this.value)" placeholder="Szukaj klienta, auta, polisy..." class="w-full bg-luxBg border border-luxBorder rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-goldAccent">
+                <div id="globalSearchResults" class="absolute top-full left-0 right-0 mt-2 bg-white rounded-xl shadow-2xl border border-luxBorder hidden z-50 max-h-72 overflow-y-auto"></div>
+            </div>
+
+            <nav class="flex flex-wrap gap-1 bg-luxBg p-1.5 rounded-xl border border-luxBorder items-center">
+                <button onclick="switchTab('dashboard')" id="btn-dashboard" class="px-3 py-2 rounded-lg text-sm font-medium transition-all bg-goldAccent text-white shadow-sm">Pulpit</button>
+                <button onclick="switchTab('clients')" id="btn-clients" class="px-3 py-2 rounded-lg text-sm font-medium text-textMuted hover:text-textDark">Klienci</button>
+                <button onclick="switchTab('policies')" id="btn-policies" class="px-3 py-2 rounded-lg text-sm font-medium text-textMuted hover:text-textDark">Polisy</button>
+                <button onclick="switchTab('offers')" id="btn-offers" class="px-3 py-2 rounded-lg text-sm font-medium text-textMuted hover:text-textDark">Oferty</button>
+                <button onclick="switchTab('renewals')" id="btn-renewals" class="px-3 py-2 rounded-lg text-sm font-medium text-textMuted hover:text-textDark">Odnowienia</button>
+                <button onclick="switchTab('finances')" id="btn-finances" class="px-3 py-2 rounded-lg text-sm font-medium text-textMuted hover:text-textDark">Finanse</button>
+                <button onclick="switchTab('calendar')" id="btn-calendar" class="px-3 py-2 rounded-lg text-sm font-medium text-textMuted hover:text-textDark">📅 Kalendarz</button>
+                <div class="w-px h-6 bg-luxBorder mx-1"></div>
+                <button onclick="switchTab('settings')" id="btn-settings" class="px-3 py-2 rounded-lg text-sm font-medium text-textMuted hover:text-textDark">⚙️</button>
+            </nav>
+        </div>
+    </header>
+
+    <!-- 3. GŁÓWNA ZAWARTOŚĆ APLIKACJI -->
+    <main class="max-w-7xl mx-auto px-4 py-8 flex-grow w-full hidden" id="mainAppContent">
+        
+        <!-- ZAKŁADKA: PULPIT -->
+        <section id="tab-dashboard" class="space-y-6">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div class="lux-card p-5 rounded-2xl border-l-4 border-goldAccent"><span class="text-[10px] font-bold text-textMuted uppercase block">Wystawione (Ten Mc)</span><p id="dash_countPolicies" class="text-2xl font-extrabold text-textDark mt-1">0</p></div>
+                <div class="lux-card p-5 rounded-2xl border-l-4 border-indigo-500"><span class="text-[10px] font-bold text-textMuted uppercase block">Przypis (Ten Mc)</span><p id="dash_monthPrem" class="text-2xl font-extrabold text-indigo-600 mt-1">0,00 PLN</p></div>
+                <div class="lux-card p-5 rounded-2xl border-l-4 border-green-500"><span class="text-[10px] font-bold text-textMuted uppercase block">Prowizja (Ten Mc)</span><p id="dash_monthComm" class="text-2xl font-extrabold text-green-600 mt-1">0,00 PLN</p></div>
+                <div class="lux-card p-5 rounded-2xl bg-amber-50 border border-amber-200">
+                    <div class="flex justify-between items-center mb-1"><span class="text-[10px] font-bold text-amber-800 uppercase">Cel Miesięczny</span><button onclick="editMonthlyGoal()" class="text-[10px] text-amber-900 underline">Edytuj</button></div>
+                    <p id="dash_goalText" class="text-sm font-bold text-amber-900">0 / 10 000 PLN</p>
+                    <div class="w-full bg-amber-200 rounded-full h-2 mt-2"><div id="dash_goalBar" class="bg-amber-600 h-2 rounded-full" style="width: 0%"></div></div>
+                </div>
+            </div>
+
+            <div class="lux-card p-4 rounded-2xl flex flex-wrap gap-3 items-center justify-between">
+                <span class="text-xs font-bold text-textMuted uppercase ml-1">Skróty:</span>
+                <div class="flex flex-wrap gap-2">
+                    <a href="https://strefa-agenta.superpolisa.pl" target="_blank" class="px-3 py-1.5 bg-red-50 text-red-700 border border-red-200 rounded-xl text-xs font-bold hover:bg-red-100">🔴 Superpolisa</a>
+                    <a href="https://historiapojazdu.gov.pl" target="_blank" class="px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-xl text-xs font-bold hover:bg-blue-100">🚗 Historia Pojazdu</a>
+                    <a href="https://www.ufg.pl" target="_blank" class="px-3 py-1.5 bg-green-50 text-green-700 border border-green-200 rounded-xl text-xs font-bold hover:bg-green-100">🛡️ UFG</a>
+                    <a href="https://prod.ceidg.gov.pl" target="_blank" class="px-3 py-1.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-xl text-xs font-bold hover:bg-purple-100">🏢 CEIDG/GUS</a>
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="openOfferModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-4 py-2 rounded-xl text-xs shadow-sm">📋 Nowa Oferta</button>
+                    <button onclick="window.print()" class="bg-gray-800 hover:bg-gray-900 text-white font-semibold px-4 py-2 rounded-xl text-xs shadow-sm">🖨️ Plan na dziś</button>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div class="lux-card rounded-2xl p-6 border-t-4 border-amber-500 lg:col-span-2 space-y-4">
+                    <h3 class="font-bold text-lg flex items-center gap-2">🔄 Kończy się w ciągu 30 dni</h3>
+                    <div id="dash_thirtyDays" class="space-y-2"></div>
+                </div>
+                <div class="lux-card rounded-2xl p-6 bg-amber-50/50 border border-amber-200 flex flex-col justify-between">
+                    <div><h3 class="font-bold text-lg mb-3 text-amber-900">📌 Szybki Notatnik</h3><textarea id="quickNotesArea" oninput="saveQuickNotes()" rows="6" placeholder="Notatki (zapisują się same)..." class="w-full bg-white border border-amber-200 rounded-xl p-3 text-sm outline-none"></textarea></div>
+                </div>
+                <div class="lux-card rounded-2xl p-6 border-t-4 border-red-500"><h3 class="font-bold text-lg mb-4 flex items-center gap-2">⚠️ Zaległe raty i inspekcje</h3><div id="dash_overdue" class="space-y-3"></div></div>
+                <div class="lux-card rounded-2xl p-6 border-t-4 border-goldAccent"><h3 class="font-bold text-lg mb-4 flex items-center gap-2">💸 Raty (najbliższe 7 dni)</h3><div id="dash_upcoming" class="space-y-3"></div></div>
+                <div class="lux-card rounded-2xl p-6 border-t-4 border-blue-500"><h3 class="font-bold text-lg mb-4 flex items-center gap-2">🎂 Urodziny i Przeglądy</h3><div id="dash_birthdays" class="flex flex-wrap gap-2"></div></div>
+            </div>
+        </section>
+
+        <!-- ZAKŁADKA: KLIENCI -->
+        <section id="tab-clients" class="space-y-6 hidden">
+            <div class="flex flex-col sm:flex-row justify-between items-center gap-4"><h2 class="text-2xl font-bold">Baza Klientów</h2><button onclick="openClientModal()" class="bg-goldAccent hover:bg-goldHover text-white font-semibold px-5 py-2.5 rounded-xl shadow-md">+ Dodaj Klienta</button></div>
+            <div class="lux-card rounded-2xl overflow-hidden shadow-sm">
+                <div class="p-4 border-b border-luxBorder bg-luxBg/50"><input type="text" id="searchClient" oninput="renderClients()" placeholder="Filtruj bazę..." class="bg-white border border-luxBorder rounded-xl px-4 py-2 w-full sm:w-96 focus:outline-none text-sm"></div>
+                <div class="overflow-x-auto"><table class="w-full text-left border-collapse"><thead><tr class="border-b border-luxBorder text-xs text-textMuted uppercase bg-luxBg/30"><th class="p-4">Klient / Firma</th><th class="p-4">PESEL / NIP</th><th class="p-4">Prawo Jazdy / Wiek</th><th class="p-4">Kontakt</th></tr></thead><tbody id="clientsTableBody" class="divide-y divide-luxBorder text-sm"></tbody></table></div>
+            </div>
+        </section>
+        
+        <!-- ZAKŁADKA: POLISY -->
+        <section id="tab-policies" class="space-y-6 hidden">
+            <div class="flex flex-col sm:flex-row justify-between items-center gap-4"><h2 class="text-2xl font-bold">Zarządzanie Polisami</h2><button onclick="openPolicyModal()" class="bg-goldAccent hover:bg-goldHover text-white font-semibold px-5 py-2.5 rounded-xl shadow-md">+ Dodaj polisę</button></div>
+            <div class="lux-card rounded-2xl overflow-hidden shadow-sm">
+                <div class="overflow-x-auto"><table class="w-full text-left border-collapse"><thead><tr class="border-b border-luxBorder text-xs text-textMuted uppercase bg-luxBg/30"><th class="p-4">TU / Nr Polisy</th><th class="p-4">Klient</th><th class="p-4">Okres i Przedmiot</th><th class="p-4 text-right">Składka przypisana</th></tr></thead><tbody id="policiesTableBody" class="divide-y divide-luxBorder text-sm"></tbody></table></div>
+            </div>
+        </section>
+
+        <!-- ZAKŁADKA: OFERTY -->
+        <section id="tab-offers" class="space-y-6 hidden">
+            <div class="flex flex-col sm:flex-row justify-between items-center gap-4">
+                <div><h2 class="text-2xl font-bold">Zapisane Oferty</h2><p class="text-xs text-textMuted">Wracaj do ofert, zamieniaj je w polisy lub drukuj PDF.</p></div>
+                <button onclick="openOfferModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-5 py-2.5 rounded-xl shadow-md">+ Utwórz Ofertę</button>
+            </div>
+            <div class="lux-card rounded-2xl overflow-hidden shadow-sm">
+                <div class="overflow-x-auto"><table class="w-full text-left border-collapse"><thead><tr class="border-b border-luxBorder text-xs text-textMuted uppercase bg-luxBg/30"><th class="p-4">Data</th><th class="p-4">Klient</th><th class="p-4">Typ i Przedmiot</th><th class="p-4 text-right">Akcje</th></tr></thead><tbody id="offersTableBody" class="divide-y divide-luxBorder text-sm"></tbody></table></div>
+            </div>
+        </section>
+
+        <!-- ZAKŁADKA: ODNOWIENIA -->
+        <section id="tab-renewals" class="space-y-6 hidden">
+            <h2 class="text-2xl font-bold text-textDark">Lejek Odnowień (< 45 dni)</h2>
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4" id="kanbanBoard">
+                <div class="bg-gray-100 rounded-xl p-4 flex flex-col h-full border border-gray-200"><h3 class="font-bold text-gray-700 mb-3 text-sm uppercase">☎️ Do obdzwonienia</h3><div id="k_todo" class="space-y-3 flex-grow"></div></div>
+                <div class="bg-blue-50 rounded-xl p-4 flex flex-col h-full border border-blue-200"><h3 class="font-bold text-blue-700 mb-3 text-sm uppercase">✉️ Oferta wysłana</h3><div id="k_offer" class="space-y-3 flex-grow"></div></div>
+                <div class="bg-green-50 rounded-xl p-4 flex flex-col h-full border border-green-200"><h3 class="font-bold text-green-700 mb-3 text-sm uppercase">✅ Wznowione</h3><div id="k_won" class="space-y-3 flex-grow"></div></div>
+                <div class="bg-red-50 rounded-xl p-4 flex flex-col h-full border border-red-200"><h3 class="font-bold text-red-700 mb-3 text-sm uppercase">❌ Utracone</h3><div id="k_lost" class="space-y-3 flex-grow"></div></div>
+            </div>
+        </section>
+
+        <!-- ZAKŁADKA: FINANSE -->
+        <section id="tab-finances" class="space-y-6 hidden">
+            <h2 class="text-2xl font-bold">Statystyki Roczne (YOY)</h2>
+            <div class="lux-card rounded-2xl overflow-hidden shadow-sm">
+                <div class="overflow-x-auto"><table class="w-full text-left border-collapse"><thead><tr class="border-b border-luxBorder text-xs text-textMuted uppercase bg-luxBg/30"><th class="p-4">Rok</th><th class="p-4 text-right">Przypis</th><th class="p-4 text-right">Prowizja Całk.</th><th class="p-4 text-right">Wypłacono</th><th class="p-4 text-right">Do Wypłaty</th></tr></thead><tbody id="yearlyStatsBody" class="divide-y divide-luxBorder text-sm"></tbody></table></div>
+            </div>
+            <div class="flex justify-between items-center mt-8">
+                <h2 class="text-2xl font-bold">Cash-flow Miesięczny</h2>
+                <div class="flex gap-2"><input type="month" id="financeMonthFilter" onchange="renderFinances()" class="border bg-white rounded-lg px-2 py-1 text-sm"><button onclick="clearFinanceFilter()" class="bg-gray-200 px-3 py-1 rounded-lg text-sm">Wszystkie</button></div>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4">
+                <div class="bg-green-50 p-4 rounded-xl border border-green-200"><span class="text-[10px] uppercase font-bold text-green-800">Prowizje Rozliczone</span><p id="f_paidAmount" class="text-xl font-bold text-green-600 mt-1">0,00 PLN</p></div>
+                <div class="bg-amber-50 p-4 rounded-xl border border-amber-200"><span class="text-[10px] uppercase font-bold text-amber-800">Prowizje Oczekujące</span><p id="f_pendingAmount" class="text-xl font-bold text-amber-600 mt-1">0,00 PLN</p></div>
+                <div class="bg-blue-50 p-4 rounded-xl border border-blue-200"><span class="text-[10px] uppercase font-bold text-blue-800">Składki Opłacone</span><p id="f_premiumPaid" class="text-xl font-bold text-blue-600 mt-1">0,00 PLN</p></div>
+                <div class="bg-red-50 p-4 rounded-xl border border-red-200"><span class="text-[10px] uppercase font-bold text-red-800">Składki Oczekujące</span><p id="f_premiumPending" class="text-xl font-bold text-red-600 mt-1">0,00 PLN</p></div>
+            </div>
+            <div class="lux-card rounded-2xl overflow-hidden shadow-sm mt-4">
+                <div class="overflow-x-auto"><table class="w-full text-left border-collapse"><thead><tr class="border-b border-luxBorder text-xs text-textMuted uppercase bg-luxBg/30"><th class="p-4">TU</th><th class="p-4">Klient</th><th class="p-4">Termin Raty</th><th class="p-4 text-right">Składka oczekująca</th><th class="p-4 text-right">Zablokowana Prowizja</th></tr></thead><tbody id="financePendingBody" class="divide-y divide-luxBorder text-sm"></tbody></table></div>
+            </div>
+        </section>
+
+        <!-- ZAKŁADKA: KALENDARZ -->
+        <section id="tab-calendar" class="space-y-6 hidden">
+            <div class="flex flex-col sm:flex-row justify-between items-center gap-4">
+                <h2 class="text-2xl font-bold">Kalendarz i Przypomnienia</h2>
+                <div class="flex gap-2 items-center bg-luxCard p-1.5 rounded-xl border border-luxBorder">
+                    <button onclick="changeCalendarMonth(-1)" class="px-3 py-1 bg-luxBg rounded-lg text-sm hover:bg-gray-200 font-bold">◀</button>
+                    <span id="calendarMonthLabel" class="text-sm font-bold w-32 text-center text-textDark">Listopad 2026</span>
+                    <button onclick="changeCalendarMonth(1)" class="px-3 py-1 bg-luxBg rounded-lg text-sm hover:bg-gray-200 font-bold">▶</button>
+                </div>
+            </div>
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div class="lg:col-span-2 lux-card rounded-2xl p-6">
+                    <div class="grid grid-cols-7 gap-2 text-center text-xs font-bold text-textMuted mb-2">
+                        <div>Pon</div><div>Wto</div><div>Śro</div><div>Czw</div><div>Pią</div><div>Sob</div><div>Nie</div>
+                    </div>
+                    <div id="calendarGrid" class="grid grid-cols-7 gap-2"></div>
+                </div>
+                <div class="lux-card rounded-2xl p-6 space-y-4">
+                    <h3 class="font-bold text-lg border-b border-luxBorder pb-2">Wydarzenia w tym miesiącu</h3>
+                    <div id="calendarEventsList" class="space-y-3 max-h-[500px] overflow-y-auto pr-2"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ZAKŁADKA: USTAWIENIA -->
+        <section id="tab-settings" class="space-y-6 hidden">
+            <h2 class="text-2xl font-bold text-textDark">⚙️ Słowniki i Administracja</h2>
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div class="lux-card rounded-2xl p-6">
+                    <h3 class="font-bold text-lg mb-2">Biblioteka TU</h3>
+                    <div class="flex gap-2 mb-4"><input type="text" id="set_newInsurer" placeholder="Nazwa TU" class="flex-grow border p-2 rounded-xl text-sm uppercase"><button onclick="addInsurerToLibrary()" class="bg-textDark text-white px-4 rounded-xl font-bold">Dodaj</button></div>
+                    <div class="overflow-y-auto max-h-60 border border-luxBorder rounded-xl"><table class="w-full text-left border-collapse"><tbody id="insurersLibraryBody" class="divide-y divide-luxBorder text-sm"></tbody></table></div>
+                </div>
+                <div class="lux-card rounded-2xl p-6">
+                    <h3 class="font-bold text-lg mb-2">Słownik Prowizji</h3>
+                    <div class="space-y-2 mb-4 bg-luxBg p-3 rounded-xl border border-luxBorder">
+                        <div class="grid grid-cols-2 gap-2"><div><label class="text-[10px] uppercase">TU</label><select id="set_insurer" class="w-full border p-2 rounded-lg text-sm mt-1"></select></div><div><label class="text-[10px] uppercase">Ryzyko</label><input type="text" id="set_risk" class="w-full border p-2 rounded-lg text-sm mt-1 uppercase"></div></div>
+                        <div class="grid grid-cols-2 gap-2 items-end"><div><label class="text-[10px] uppercase">Prowizja (%)</label><input type="number" id="set_pct" class="w-full border p-2 rounded-lg text-sm mt-1"></div><button onclick="addCommissionRule()" class="w-full bg-goldAccent text-white py-2 rounded-lg font-bold">Zapisz</button></div>
+                    </div>
+                    <div class="overflow-y-auto max-h-40 border border-luxBorder rounded-xl"><table class="w-full text-left border-collapse"><thead class="bg-luxBg text-[10px] uppercase sticky top-0"><tr><th class="p-2">TU</th><th class="p-2">Ryzyko</th><th class="p-2 text-right">Stawka</th><th class="p-2"></th></tr></thead><tbody id="commissionDictBody" class="divide-y divide-luxBorder text-sm"></tbody></table></div>
+                </div>
+            </div>
+            <div class="text-right mt-4"><button onclick="exportData()" class="px-4 py-2 bg-blue-50 text-blue-700 rounded-lg text-xs font-bold mr-2">⬇️ Eksport JSON</button><button onclick="clearDatabase()" class="px-4 py-2 bg-red-50 text-red-600 rounded-lg text-xs font-bold">🗑️ Wyczyść Bazę</button></div>
+        </section>
+    </main>
+
+    <!-- 4. MODALE POMOCNICZE (Otwierane w oknach) -->
+    
+    <!-- MODAL: KARTA KLIENTA PEŁNA -->
+    <div id="clientFullModalOverlay" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-2 sm:p-4" onclick="if(event.target === this) closeClientFull()">
+        <div class="bg-luxCard shadow-2xl modal-fullscreen rounded-2xl flex flex-col relative overflow-hidden mx-auto my-auto border border-luxBorder" onclick="event.stopPropagation()">
+            <div class="bg-luxBg border-b border-luxBorder px-6 py-4 flex justify-between items-center sticky top-0 z-10">
+                <div><h2 class="text-2xl font-bold text-textDark" id="cfm_name">-</h2><p class="text-sm font-mono text-textMuted" id="cfm_pesel">PESEL / NIP: -</p></div>
+                <div class="flex items-center gap-3">
+                    <button onclick="addCalendarEvent('client')" class="px-3 py-2 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-sm font-bold">📅 Google Cal</button>
+                    <button onclick="toggleCfmEdit()" id="cfm_btnEdit" class="px-4 py-2 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg text-sm font-bold">Edytuj</button>
+                    <button onclick="openOfferModal(null, currentOpenId)" class="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold">📋 Oferta</button>
+                    <button onclick="closeClientFull()" class="text-gray-400 font-bold text-3xl px-2">&times;</button>
+                </div>
+            </div>
+            <div class="flex-grow overflow-y-auto p-6 bg-white">
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
+                    <div class="space-y-4">
+                        <h3 class="font-bold text-lg border-b border-luxBorder pb-2 text-goldAccent">Dane Kalkulacyjne / Firmowe</h3>
+                        <div id="cfm_viewMode" class="space-y-2.5 text-sm">
+                            <div class="grid grid-cols-2"><span class="text-textMuted">Telefon:</span><span id="cv_phone" class="font-medium">-</span></div>
+                            <div class="grid grid-cols-2"><span class="text-textMuted">E-mail:</span><span id="cv_email" class="font-medium">-</span></div>
+                            <div class="grid grid-cols-2"><span class="text-textMuted">Data ur.:</span><span id="cv_birth" class="font-medium">-</span></div>
+                            <div class="grid grid-cols-2"><span class="text-textMuted">Pr. jazdy:</span><span id="cv_license" class="font-medium text-goldAccent">-</span></div>
+                            <div class="w-full h-px bg-luxBorder my-2"></div>
+                            <div class="grid grid-cols-2"><span class="text-textMuted">NIP:</span><span id="cv_nip" class="font-mono font-medium">-</span></div>
+                            <div class="grid grid-cols-2"><span class="text-textMuted">REGON:</span><span id="cv_regon" class="font-mono font-medium">-</span></div>
+                            <div class="w-full h-px bg-luxBorder my-2"></div>
+                            <div class="grid grid-cols-2"><span class="text-textMuted">Adres:</span><span id="cv_address" class="font-medium whitespace-pre-line">-</span></div>
+                            <div class="grid grid-cols-2"><span class="text-textMuted">Źródło polecenia:</span><span id="cv_source" class="font-medium">-</span></div>
+                        </div>
+                        <div id="cfm_editMode" class="space-y-3 text-sm hidden bg-luxBg p-4 rounded-xl border border-luxBorder">
+                            <input type="text" id="ce_name" class="w-full border rounded p-1.5 mb-2" placeholder="Imię / Nazwa">
+                            <div class="grid grid-cols-2 gap-2"><input type="text" id="ce_pesel" maxlength="11" oninput="this.value=this.value.replace(/[^0-9]/g,'')" class="w-full border rounded p-1.5" placeholder="PESEL"><input type="text" id="ce_phone" class="w-full border rounded p-1.5" placeholder="Telefon"></div>
+                            <div class="grid grid-cols-2 gap-2"><input type="text" id="ce_nip" maxlength="10" class="w-full border rounded p-1.5" placeholder="NIP"><input type="text" id="ce_regon" class="w-full border rounded p-1.5" placeholder="REGON"></div>
+                            <input type="email" id="ce_email" class="w-full border rounded p-1.5 mt-2" placeholder="E-mail">
+                            <div class="grid grid-cols-2 gap-2 mt-2"><input type="date" id="ce_birth" class="w-full border rounded p-1.5"><input type="date" id="ce_license" class="w-full border rounded p-1.5"></div>
+                            <textarea id="ce_address" rows="2" class="w-full border rounded p-1.5 mt-2" placeholder="Adres"></textarea>
+                            <input type="text" id="ce_source" class="w-full border rounded p-1.5 mt-2" placeholder="Źródło (np. Polecenie od J.Kowalskiego)">
+                            <button onclick="saveCfmEdits()" class="w-full bg-goldAccent text-white text-sm py-2 rounded-lg font-bold mt-2">Zapisz zmiany</button>
+                        </div>
+                    </div>
+                    <div class="space-y-6">
+                        <div>
+                            <div class="flex justify-between items-center border-b border-luxBorder pb-2"><h3 class="font-bold text-lg text-textDark">Garaż</h3><button onclick="toggleAddVehicle()" class="text-xs font-bold bg-blue-50 text-blue-700 px-2.5 py-1 rounded">+ Dodaj</button></div>
+                            <div id="cfm_addVehicleBox" class="hidden bg-blue-50 border border-blue-200 p-3 rounded-xl mt-3 space-y-2 text-sm">
+                                <input type="text" id="v_brand" placeholder="Marka i Model" class="w-full border rounded p-1.5">
+                                <div class="grid grid-cols-2 gap-2"><input type="number" id="v_year" placeholder="Rok" class="w-full border rounded p-1.5"><input type="text" id="v_plate" placeholder="Nr Rej." class="w-full border rounded p-1.5 uppercase"></div>
+                                <div class="grid grid-cols-2 gap-2 mt-1"><input type="text" id="v_vin" placeholder="VIN" maxlength="17" class="w-full border rounded p-1.5 uppercase"><input type="date" id="v_inspection" class="w-full border rounded p-1.5" title="Koniec przeglądu rejestracyjnego"></div>
+                                <div class="mt-2"><label class="text-xs font-bold"><input type="checkbox" id="v_anglik" class="mr-1"> 🇬🇧 Anglik / USA (Trudne ryzyko)</label></div>
+                                <button onclick="saveVehicle()" class="w-full bg-blue-600 text-white font-bold py-1.5 rounded mt-2">Zapisz pojazd</button>
+                            </div>
+                            <div id="cfm_vehiclesList" class="space-y-3 mt-3"></div>
+                        </div>
+                        <div>
+                            <div class="flex justify-between items-center border-b border-luxBorder pb-2"><h3 class="font-bold text-lg text-textDark">Lokale</h3><button onclick="toggleAddProperty()" class="text-xs font-bold bg-green-50 text-green-700 px-2.5 py-1 rounded">+ Dodaj</button></div>
+                            <div id="cfm_addPropertyBox" class="hidden bg-green-50 border border-green-200 p-3 rounded-xl mt-3 space-y-2 text-sm">
+                                <select id="prop_type" class="w-full border rounded p-1.5"><option>Mieszkanie</option><option>Dom</option><option>Firma</option></select>
+                                <input type="text" id="prop_address" placeholder="Adres nieruchomości" class="w-full border rounded p-1.5 mt-1">
+                                <div class="mt-2 space-y-1">
+                                    <label class="text-xs font-bold block"><input type="checkbox" id="prop_flammable" class="mr-1"> 🔥 Konstrukcja Palna (Drewno)</label>
+                                    <label class="text-xs font-bold block"><input type="checkbox" id="prop_flood" class="mr-1"> 🌊 Teren Zalewowy</label>
+                                </div>
+                                <button onclick="saveProperty()" class="w-full bg-green-600 text-white font-bold py-1.5 rounded mt-2">Zapisz lokal</button>
+                            </div>
+                            <div id="cfm_propertiesList" class="space-y-3 mt-3"></div>
+                        </div>
+                    </div>
+                    <div class="space-y-6">
+                        <div class="flex justify-between items-center border-b border-luxBorder pb-2"><h3 class="font-bold text-lg text-textDark">Historia Polis</h3><button onclick="openPolicyModal(null, currentOpenId)" class="text-xs font-bold bg-goldAccent text-white px-2.5 py-1 rounded">+ Nowa Polisa</button></div>
+                        <div id="cfm_policiesList" class="space-y-3 mt-3"></div>
+                        
+                        <div class="border-b border-luxBorder pb-2 mt-8"><h3 class="font-bold text-lg text-textDark">Obce Polisy (Do przejęcia)</h3></div>
+                        <div id="cfm_externalPoliciesBox" class="bg-gray-50 border p-3 rounded-xl mt-3 space-y-2 text-sm">
+                            <input type="text" id="ext_subject" placeholder="Czego dotyczy (np. PZU Dom)" class="w-full border rounded p-1.5">
+                            <div class="flex gap-2"><input type="date" id="ext_date" class="w-full border rounded p-1.5"><button onclick="saveExternalPolicy()" class="bg-gray-800 text-white px-3 rounded font-bold">Zapisz</button></div>
+                        </div>
+                        <div id="cfm_externalList" class="space-y-2 mt-3"></div>
+
+                        <div class="mt-8 pt-4 border-t border-red-100 text-right"><button onclick="deleteCurrentClient()" class="text-xs font-semibold text-red-500 hover:underline">🗑️ Usuń klienta całkowicie</button></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- DRAWER: PODGLĄD POLISY -->
+    <div id="policyDrawerOverlay" class="fixed inset-0 bg-black/20 backdrop-blur-sm z-50 hidden transition-opacity" onclick="closeDrawer('policy')"></div>
+    <div id="policyDrawer" class="fixed top-0 right-0 h-full w-full max-w-md bg-luxCard shadow-2xl z-50 drawer-closed transition-transform duration-300 flex flex-col border-l border-luxBorder">
+        <div class="p-6 border-b border-luxBorder bg-luxBg/50 relative">
+            <button onclick="closeDrawer('policy')" class="absolute top-4 right-4 text-textMuted font-bold text-xl">&times;</button>
+            <span id="pd_insurer" class="text-xs font-bold text-goldAccent uppercase block mt-2">-</span>
+            <h2 id="pd_type" class="text-2xl font-bold text-textDark mt-1">-</h2><p id="pd_number" class="text-sm font-mono text-textMuted mt-1">Nr: -</p>
+            <div class="flex gap-3 mt-5">
+                <button onclick="clonePolicyToRenewal()" class="flex-1 bg-green-50 text-green-700 border border-green-200 py-2 rounded-xl text-sm font-bold">🔄 Wznów (Klonuj)</button>
+                <button onclick="openPolicyModal(currentOpenPolicyId)" class="flex-1 text-center py-2 bg-white border border-luxBorder rounded-xl text-sm font-medium">✏️ Edytuj</button>
+            </div>
+        </div>
+        <div class="p-6 flex-grow overflow-y-auto space-y-6 flex flex-col justify-between">
+            <div>
+                <h3 class="font-bold text-lg border-b border-luxBorder pb-1 mb-3">Szczegóły</h3>
+                <div class="space-y-3 text-sm">
+                    <div class="grid grid-cols-3"><span class="text-textMuted">Klient:</span><span id="pd_clientName" class="col-span-2 font-medium text-goldAccent cursor-pointer hover:underline"></span></div>
+                    <div class="grid grid-cols-3"><span class="text-textMuted">Przedmiot:</span><span id="pd_subject" class="col-span-2 font-medium">-</span></div>
+                    <div class="grid grid-cols-3"><span class="text-textMuted">Okres:</span><span class="col-span-2 font-medium"><span id="pd_start"></span> do <span id="pd_end" class="font-bold text-red-500"></span></span></div>
+                </div>
+                <h3 class="font-bold text-lg border-b border-luxBorder pb-1 mb-3 mt-6">Ryzyka i Finanse</h3>
+                <div id="pd_risksList" class="space-y-2 text-sm bg-gray-50 border p-3 rounded-xl mb-4"></div>
+                <div class="space-y-2 text-sm bg-luxBg p-3 rounded-xl border"><div class="grid grid-cols-3"><span class="text-textMuted">Składka:</span><span id="pd_premium" class="col-span-2 font-bold">-</span></div><div class="grid grid-cols-3"><span class="text-textMuted">Prowizja:</span><span id="pd_comm" class="col-span-2 font-semibold text-green-700">-</span></div></div>
+                
+                <div id="pd_tasksBox" class="mt-4 p-4 bg-red-50 rounded-xl border border-red-200 hidden">
+                    <p class="text-xs font-bold text-red-800 uppercase border-b border-red-200 pb-1 mb-2">Zadania Po-Polisowe</p>
+                    <label id="pd_taskAcContainer" class="text-sm font-bold flex items-center hidden"><input type="checkbox" id="pd_taskAc" onchange="togglePolicyTask('ac')" class="mr-2 w-4 h-4"> 📸 Zdjęcia do AC</label>
+                    <label id="pd_taskOcContainer" class="text-sm font-bold flex items-center mt-1 hidden"><input type="checkbox" id="pd_taskOc" onchange="togglePolicyTask('oc')" class="mr-2 w-4 h-4"> ✉️ Wypowiedzenie OC wysłane</label>
+                </div>
+
+                <div id="pd_installmentsBox" class="mt-4 p-4 bg-amber-50 rounded-xl border border-amber-200 hidden">
+                    <p class="text-xs font-bold text-amber-800 uppercase border-b border-amber-200 pb-1 mb-3">Harmonogram Rat</p>
+                    <div id="pd_installmentsList" class="space-y-3 text-sm"></div>
+                </div>
+            </div>
+            <div class="mt-8 pt-4 border-t border-red-100 text-center"><button onclick="deletePolicy(currentOpenPolicyId)" class="text-xs font-semibold text-red-500 hover:underline">🗑️ Usuń polisę na stałe</button></div>
+        </div>
+    </div>
+
+    <!-- MODAL: KREATOR POLISY -->
+    <div id="policyModal" class="fixed inset-0 bg-black/40 backdrop-blur-sm hidden items-center justify-center z-50 p-4">
+        <div class="lux-card rounded-2xl p-6 w-full max-w-xl bg-white shadow-xl relative max-h-[95vh] overflow-y-auto">
+            <button onclick="closePolicyModal()" class="absolute top-4 right-4 text-textMuted font-bold text-xl">&times;</button>
+            <h3 id="policyModalTitle" class="font-bold text-lg mb-1">Dodaj nową polisę</h3>
+            <p id="policyStepIndicator" class="text-xs text-textMuted mb-5">Krok 1 z 4</p>
+
+            <!-- KROK 1 -->
+            <div id="pStep1" class="space-y-4">
+                <div><label class="text-xs font-semibold text-textMuted">PESEL / NIP Klienta</label><input type="text" id="p_peselInput" maxlength="11" oninput="handlePolicyPeselInput(this)" class="w-full border p-2 rounded-xl text-sm mt-1 outline-none"></div>
+                <div id="p_clientFoundBox" class="hidden p-3 bg-green-50 border border-green-200 rounded-xl flex items-center gap-3"><span class="text-green-600 font-bold text-xl">✓</span><div><p class="text-xs text-green-700 font-bold">Rozpoznano</p><p id="p_clientFoundName" class="text-sm font-semibold">-</p></div></div>
+            </div>
+
+            <!-- KROK 2 -->
+            <div id="pStep2" class="space-y-4 hidden">
+                <div class="flex gap-4 p-3 bg-blue-50 border border-blue-200 rounded-xl mb-4">
+                    <label class="flex items-center text-sm font-bold"><input type="radio" name="p_salesType" value="new" checked class="mr-2"> Nowy Biznes</label>
+                    <label class="flex items-center text-sm font-bold"><input type="radio" name="p_salesType" value="renewal" class="mr-2"> Wznowienie</label>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div><label class="text-xs font-semibold text-textMuted">TU</label><select id="p_insurer" onchange="updateRiskDatalist()" class="w-full border p-2 rounded-xl text-sm mt-1"></select></div>
+                    <div><label class="text-xs font-semibold text-textMuted">Rodzaj</label><select id="p_type" class="w-full border p-2 rounded-xl text-sm mt-1"><option>Komunikacja</option><option>Majątek</option><option>Travel</option><option>Firmowe</option></select></div>
+                </div>
+                <div><label class="text-xs font-semibold text-textMuted">Nr Polisy</label><input type="text" id="p_number" class="w-full border p-2 rounded-xl text-sm mt-1"></div>
+                <div class="grid grid-cols-2 gap-3"><div><label class="text-xs font-semibold text-textMuted">Początek</label><input type="date" id="p_dateStart" onchange="autoFillEndDate(this.value)" class="w-full border p-2 rounded-xl text-sm mt-1"></div><div><label class="text-xs font-semibold text-textMuted">Koniec</label><input type="date" id="p_dateEnd" class="w-full border p-2 rounded-xl text-sm mt-1"></div></div>
+            </div>
+
+            <!-- KROK 3 -->
+            <div id="pStep3" class="space-y-4 hidden">
+                <div><label class="text-xs font-bold text-textDark block mb-1">Przedmiot Ubezpieczenia (opis, marka/model, adres)</label><input type="text" id="p_homeAddress" placeholder="Wpisz ręcznie" class="w-full border p-2 rounded-xl text-sm mt-1"></div>
+                
+                <div class="bg-red-50 p-3 border border-red-200 rounded-xl mt-4 space-y-2">
+                    <p class="text-xs font-bold text-red-800">Czy wymaga działań po-polisowych?</p>
+                    <label class="text-sm font-bold block"><input type="checkbox" id="p_reqAc" class="mr-2">Wymagane zdjęcia AC (inspekcja)</label>
+                    <label class="text-sm font-bold block"><input type="checkbox" id="p_reqOc" class="mr-2">Wymagane wypowiedzenie starego OC</label>
+                </div>
+            </div>
+
+            <!-- KROK 4 -->
+            <div id="pStep4" class="space-y-4 hidden">
+                <div class="bg-gray-50 border border-gray-200 rounded-xl p-4">
+                    <h4 class="font-bold text-sm text-textDark mb-3">🛡️ Ryzyka</h4>
+                    <div class="grid grid-cols-12 gap-2 items-end mb-3">
+                        <div class="col-span-5"><input list="riskDatalist" id="p_riskNameInput" oninput="checkRiskDictForAutoFill()" placeholder="Nazwa" class="w-full border rounded p-2 text-sm uppercase bg-white"><datalist id="riskDatalist"></datalist></div>
+                        <div class="col-span-3"><input type="number" id="p_riskPremInput" placeholder="Skł(PLN)" class="w-full border rounded p-2 text-sm bg-white"></div>
+                        <div class="col-span-2"><input type="number" id="p_riskPctInput" placeholder="%" class="w-full border rounded p-2 text-sm bg-yellow-50"></div>
+                        <div class="col-span-2"><button onclick="addRiskToTemp()" class="w-full bg-textDark text-white font-bold text-sm py-2 rounded">Dodaj</button></div>
+                    </div>
+                    <div id="p_tempRisksList" class="space-y-2 mt-2 max-h-32 overflow-y-auto"></div>
+                </div>
+                <div class="grid grid-cols-2 gap-3 p-3 bg-luxBg rounded-xl border border-luxBorder"><div><label class="text-xs font-semibold text-textMuted">Składka Całk.</label><input type="number" id="p_premium" readonly class="w-full border bg-gray-100 p-2 rounded-xl text-sm font-bold"></div><div><label class="text-xs font-semibold text-textMuted">Prowizja Całk.</label><input type="text" id="p_commValue" readonly class="w-full border bg-green-50 p-2 rounded-xl text-sm font-bold text-green-700"></div></div>
+                <div class="grid grid-cols-2 gap-3"><div><label class="text-xs font-semibold text-textMuted">Liczba rat</label><select id="p_installments" onchange="calcInstallmentsOnly()" class="w-full border p-2 rounded-xl text-sm"><option value="1">1</option><option value="2">2</option><option value="4">4</option></select></div><div><label class="text-xs font-semibold text-textMuted">Termin I raty</label><input type="date" id="p_firstPaymentDate" onchange="calcInstallmentsOnly()" class="w-full border p-2 rounded-xl text-sm"></div></div>
+                <div id="p_installmentsContainer" class="hidden space-y-2 p-3 bg-amber-50 rounded-xl border border-amber-200"><p class="text-xs font-bold text-amber-800">Harmonogram rat</p><div id="p_installmentsList" class="space-y-2"></div></div>
+            </div>
+
+            <div class="flex justify-between mt-6 pt-4 border-t border-luxBorder">
+                <button id="p_btnPrev" onclick="policyStep(-1)" class="px-4 py-2 border rounded-lg text-sm hidden">Wstecz</button>
+                <div class="flex-grow"></div>
+                <button id="p_btnNext" onclick="policyStep(1)" class="px-6 py-2 bg-textDark text-white rounded-lg text-sm font-bold disabled:opacity-50">Dalej</button>
+                <button id="p_btnSave" onclick="savePolicy()" class="px-6 py-2 bg-goldAccent text-white rounded-lg text-sm font-bold hidden">Zapisz polisę</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: KREATOR OFERT -->
+    <div id="offerModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4 transition-opacity" onclick="if(event.target === this) closeOfferModal()">
+        <div class="lux-card rounded-2xl p-6 w-full max-w-4xl bg-white shadow-xl relative max-h-[95vh] flex flex-col" onclick="event.stopPropagation()">
+            <div class="flex justify-between items-center border-b border-luxBorder pb-4 mb-4">
+                <h3 class="font-bold text-xl text-textDark" id="offerModalHeader">📋 Kreator Oferty</h3>
+                <button onclick="closeOfferModal()" class="text-gray-400 hover:text-textDark font-bold text-2xl">&times;</button>
+            </div>
+            
+            <div class="flex-grow overflow-y-auto space-y-4 p-2" id="offerPrintArea">
+                <div id="pdfHeader" class="hidden mb-6 border-b-2 border-gray-800 pb-4">
+                    <div class="flex justify-between items-start">
+                        <div><h1 class="text-xl font-extrabold text-gray-900 uppercase">OFERTA UBEZPIECZENIA</h1><p class="text-sm mt-1">Klient: <span id="pdfClientName" class="font-bold"></span></p><p class="text-sm">Przedmiot: <span id="pdfSubject" class="font-bold"></span></p></div>
+                        <div class="text-right text-xs text-gray-700"><p class="font-bold text-sm text-gray-900">Doradca: PAWEŁ BUJAK</p><p>tel. 508 18 49 49 | pawel.bujak@superpolisa.pl</p><p class="text-gray-500 mt-2">Data: <span id="pdfCalcDate"></span></p></div>
+                    </div>
+                </div>
+
+                <div id="offerSetupArea" class="grid grid-cols-1 md:grid-cols-2 gap-3 bg-luxBg p-4 rounded-xl border border-luxBorder">
+                    <div><label class="text-xs font-bold block mb-1">Klient</label><select id="off_clientSelect" onchange="updateOfferClientName()" class="w-full border p-2 rounded-lg text-sm bg-white font-semibold"></select></div>
+                    <div><label class="text-xs font-bold block mb-1">Typ Oferty</label><input type="text" id="off_typeSelect" value="Majątek (Dom/Mieszkanie)" class="w-full border p-2 rounded-lg text-sm bg-white font-semibold"></div>
+                    <div class="md:col-span-2"><label class="text-xs font-bold block mb-1">Przedmiot Ubezpieczenia (Tylko dane do oferty)</label><input type="text" id="off_subjectInput" placeholder="np. Mieszkanie 60m2" class="w-full border p-2 rounded-lg text-sm bg-white"></div>
+                </div>
+                
+                <div id="offerFormArea" class="bg-indigo-50 border border-indigo-200 rounded-xl p-4">
+                    <div class="flex justify-between items-center mb-2"><h4 class="font-bold text-xs uppercase text-indigo-900">Dodaj wariant TU</h4><button onclick="copyAIPrompt()" class="text-[10px] bg-indigo-600 text-white px-2 py-1 rounded font-bold">🤖 Generuj Prompt dla AI</button></div>
+                    <div class="grid grid-cols-12 gap-2 items-end">
+                        <div class="col-span-12 sm:col-span-3"><select id="off_tu" class="w-full border p-2 rounded-lg text-sm bg-white"></select></div>
+                        <div class="col-span-12 sm:col-span-5"><input type="text" id="off_risks" placeholder="Zakres (np. Mury 500k)" class="w-full border p-2 rounded-lg text-sm bg-white"></div>
+                        <div class="col-span-6 sm:col-span-2"><input type="text" id="off_rata" placeholder="I Rata" class="w-full border p-2 rounded-lg text-sm bg-white"></div>
+                        <div class="col-span-6 sm:col-span-2"><input type="number" id="off_prem" placeholder="Składka(PLN)" class="w-full border p-2 rounded-lg text-sm font-bold bg-white"></div>
+                        <div class="col-span-12 mt-2 flex gap-2">
+                            <label class="text-xs font-bold flex items-center"><input type="checkbox" id="off_isRecommended" class="mr-1"> ⭐ Wariant rekomendowany</label>
+                            <button onclick="addOfferRow()" class="flex-grow bg-indigo-600 text-white font-bold text-sm py-2 rounded-lg hover:bg-indigo-700">+ Dodaj wariant</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="border border-luxBorder rounded-xl overflow-hidden">
+                    <table class="w-full text-left text-sm border-collapse" id="offerTable">
+                        <thead class="bg-gray-100 text-xs text-gray-700 uppercase border-b border-gray-300">
+                            <tr><th class="p-3 w-32">TU</th><th class="p-3">Ryzyka i Sumy</th><th class="p-3 w-28 text-right">I Rata</th><th class="p-3 w-32 text-right">Składka</th><th class="p-3 text-right" id="off_actionCol">Akcje</th></tr>
+                        </thead>
+                        <tbody id="offerTableBody" class="divide-y divide-gray-200"></tbody>
+                    </table>
+                </div>
+
+                <div id="offerRecommendationArea" class="mt-4">
+                    <label class="text-xs font-bold block mb-1">Rekomendacja / Wiadomość dla klienta (Wklej tu odpowiedź od AI):</label>
+                    <textarea id="off_recommendationText" rows="3" class="w-full border border-luxBorder rounded-xl p-3 text-sm outline-none focus:border-goldAccent" placeholder="Panie Janie, przesyłam zestawienie. Zdecydowanie rekomenduję wariant..."></textarea>
+                </div>
+            </div>
+            
+            <div class="border-t border-luxBorder pt-4 mt-4 flex justify-between items-center gap-3">
+                <button onclick="saveOffer()" class="bg-goldAccent text-white px-6 py-2.5 rounded-xl font-bold shadow-md hover:bg-goldHover text-sm">💾 Zapisz w CRM</button>
+                <button onclick="generatePDF()" class="bg-indigo-600 text-white px-6 py-2.5 rounded-xl font-bold shadow-md hover:bg-indigo-700 text-sm">⬇️ Pobierz PDF</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- SZYBKI KLIENT (Z pulpitu) -->
+    <div id="clientModal" class="fixed inset-0 bg-black/40 backdrop-blur-sm hidden items-center justify-center z-50 p-4">
+        <div class="lux-card rounded-2xl p-6 w-full max-w-md bg-white shadow-xl relative">
+            <button onclick="closeClientModal()" class="absolute top-4 right-4 text-textMuted font-bold text-xl">&times;</button>
+            <h3 class="font-bold text-lg mb-4">Szybkie dodawanie klienta</h3>
+            <input type="text" id="addName" placeholder="Imię i nazwisko / Firma" class="w-full border p-2 rounded-xl mb-3 text-sm focus:border-goldAccent">
+            <input type="text" id="addPesel" placeholder="PESEL (11) lub NIP (10)" maxlength="11" oninput="this.value=this.value.replace(/[^0-9]/g,'');" class="w-full border p-2 rounded-xl mb-3 text-sm">
+            <div class="flex justify-end gap-2"><button onclick="closeClientModal()" class="px-4 py-2 border rounded-lg text-sm">Anuluj</button><button onclick="saveNewClient()" class="px-4 py-2 bg-goldAccent text-white rounded-lg text-sm font-bold">Zapisz</button></div>
+        </div>
+    </div>
+
+    <!-- PODPIĘCIE LOGIKI Z ZEWNĘTRZNYCH PLIKÓW JS -->
+    <script src="firebase-config.js"></script>
+    <script src="ui.js"></script>
+    <script src="app.js"></script>
+
+</body>
+</html>
