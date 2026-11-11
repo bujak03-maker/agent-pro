@@ -42,10 +42,14 @@ document.addEventListener('keydown', function(event) {
             return;
         }
 
-        // Szuflada polisy - Zapis ręcznej prowizji po wciśnięciu Enter
-        if (['pd_commInput', 'pd_commNoteInput'].includes(activeEl.id)) {
+        // Szuflada polisy - Zapis ręcznej prowizji i odpisu
+        if (['pd_commInput', 'pd_commNoteInput', 'pd_odpisInput'].includes(activeEl.id)) {
             event.preventDefault();
-            if (typeof saveDrawerCommissionOverride === 'function') saveDrawerCommissionOverride();
+            if (activeEl.id === 'pd_odpisInput' && typeof saveOdpisFromDrawer === 'function') {
+                saveOdpisFromDrawer();
+            } else if (typeof saveDrawerCommissionOverride === 'function') {
+                saveDrawerCommissionOverride();
+            }
             return;
         }
 
@@ -262,5 +266,16 @@ function handlePolicyTypeChange() {
         populateGarageSelectForPolicy();
     } else if (!isCar && typeof populatePropertySelectForPolicy === 'function') {
         populatePropertySelectForPolicy();
+    }
+}
+
+// Dynamiczne przeliczanie składki netto (Składka pierwotna - Odpis) w modalu polisy
+function recalcNetPremiumModal() {
+    let prem = parseFloat(document.getElementById('p_premium').value) || 0;
+    let odpis = parseFloat(document.getElementById('p_odpis').value) || 0;
+    let net = Math.max(0, prem - odpis);
+    let disp = document.getElementById('p_premiumNetDisplay');
+    if (disp) {
+        disp.innerText = (typeof formatPLN === 'function') ? formatPLN(net) : net.toFixed(2) + " PLN";
     }
 }

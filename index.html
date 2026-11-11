@@ -32,6 +32,10 @@
         .modal-fullscreen { width: 95vw; max-width: 1400px; height: 90vh; }
         #loginScreen { backdrop-filter: blur(10px); }
 
+        /* Style dla wyszarzonych polis archiwalnych i wygasłych */
+        .policy-archived { opacity: 0.6; filter: grayscale(85%); background-color: #f1f5f9 !important; border-color: #cbd5e1 !important; }
+        .policy-active { border-left-color: #b8973b !important; }
+
         @media print {
             body * { visibility: hidden !important; }
             #todayPrintSheet, #todayPrintSheet * { visibility: visible !important; }
@@ -42,7 +46,7 @@
 </head>
 <body class="bg-luxBg text-textDark min-h-screen flex flex-col relative">
 
-    <!-- POWIADOMIENIE O SKOPIOWANIU / ZAPISIE (TOAST) -->
+    <!-- POWIADOMIENIE (TOAST) -->
     <div id="copyToast" class="fixed bottom-5 right-5 bg-textDark text-white px-4 py-2.5 rounded-xl shadow-2xl text-xs font-bold z-[200] hidden transition-all border border-goldAccent">
         📋 Skopiowano do schowka!
     </div>
@@ -62,7 +66,7 @@
 
         <div class="space-y-5 text-xs">
             <div class="border border-gray-300 rounded p-3">
-                <h2 class="font-bold uppercase tracking-wider border-b border-gray-300 pb-1 mb-2 text-red-700">1. Pilne: Zadania po-polisowe i inspekcje (Zdjęcia AC / Wypowiedzenia OC)</h2>
+                <h2 class="font-bold uppercase tracking-wider border-b border-gray-300 pb-1 mb-2 text-red-700">1. Rozliczenia z TU (Skany / Gotówka) i zadania po-polisowe</h2>
                 <div id="print_tasksList" class="space-y-1"></div>
             </div>
 
@@ -151,10 +155,16 @@
         
         <!-- PULPIT -->
         <section id="tab-dashboard" class="space-y-6">
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div class="grid grid-cols-1 md:grid-cols-5 gap-4">
                 <div class="lux-card p-5 rounded-2xl border-l-4 border-goldAccent"><span class="text-[10px] font-bold text-textMuted uppercase block">Wystawione (Ten Mc)</span><p id="dash_countPolicies" class="text-2xl font-extrabold text-textDark mt-1">0</p></div>
-                <div class="lux-card p-5 rounded-2xl border-l-4 border-indigo-500"><span class="text-[10px] font-bold text-textMuted uppercase block">Przypis (Ten Mc)</span><p id="dash_monthPrem" class="text-2xl font-extrabold text-indigo-600 mt-1">0,00 PLN</p></div>
+                <div class="lux-card p-5 rounded-2xl border-l-4 border-indigo-500"><span class="text-[10px] font-bold text-textMuted uppercase block">Przypis Netto (Ten Mc)</span><p id="dash_monthPrem" class="text-2xl font-extrabold text-indigo-600 mt-1">0,00 PLN</p></div>
                 <div class="lux-card p-5 rounded-2xl border-l-4 border-green-500"><span class="text-[10px] font-bold text-textMuted uppercase block">Prowizja (Ten Mc)</span><p id="dash_monthComm" class="text-2xl font-extrabold text-green-600 mt-1">0,00 PLN</p></div>
+                <!-- KASA W RĘKU (PORTFEL GOTÓWKOWY) -->
+                <div class="lux-card p-5 rounded-2xl border-l-4 border-emerald-600 bg-emerald-50/50">
+                    <span class="text-[10px] font-bold text-emerald-800 uppercase block">💵 Gotówka do wpłaty do TU</span>
+                    <p id="dash_cashInHand" class="text-2xl font-extrabold text-emerald-700 mt-1">0,00 PLN</p>
+                    <span class="text-[9px] text-emerald-900 block mt-0.5">Pobrana gotówka od klientów</span>
+                </div>
                 <div class="lux-card p-5 rounded-2xl bg-amber-50 border border-amber-200">
                     <div class="flex justify-between items-center mb-1"><span class="text-[10px] font-bold text-amber-800 uppercase">Cel Miesięczny</span><button onclick="editMonthlyGoal()" class="text-[10px] text-amber-900 underline font-bold">Edytuj</button></div>
                     <p id="dash_goalText" class="text-sm font-bold text-amber-900">0 / 10 000 PLN</p>
@@ -177,9 +187,13 @@
             </div>
 
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <!-- WZNOWIENIA W 30 DNIACH Z OPCJĄ "ZAŁATWIONE / WZNOWIONE" -->
                 <div class="lux-card rounded-2xl p-6 border-t-4 border-amber-500 lg:col-span-2 space-y-4">
-                    <h3 class="font-bold text-lg flex items-center gap-2">🔄 Kończy się w ciągu 30 dni</h3>
-                    <div id="dash_thirtyDays" class="space-y-2"></div>
+                    <div class="flex justify-between items-center border-b border-luxBorder pb-2">
+                        <h3 class="font-bold text-lg flex items-center gap-2">🔄 Kończy się w ciągu 30 dni (Aktywne do kontaktu)</h3>
+                        <span id="dash_thirtyDaysCount" class="text-xs bg-amber-100 text-amber-900 font-bold px-2 py-0.5 rounded">0 spraw</span>
+                    </div>
+                    <div id="dash_thirtyDays" class="space-y-2 max-h-72 overflow-y-auto pr-1"></div>
                 </div>
 
                 <!-- NOTATNIK I TASKI -->
@@ -201,26 +215,45 @@
                     </div>
                 </div>
 
-                <div class="lux-card rounded-2xl p-6 border-t-4 border-red-500"><h3 class="font-bold text-lg mb-4 flex items-center gap-2">⚠️ Zaległe raty i inspekcje</h3><div id="dash_overdue" class="space-y-3"></div></div>
-                <div class="lux-card rounded-2xl p-6 border-t-4 border-goldAccent"><h3 class="font-bold text-lg mb-4 flex items-center gap-2">💸 Raty (najbliższe 7 dni)</h3><div id="dash_upcoming" class="space-y-3"></div></div>
-                <div class="lux-card rounded-2xl p-6 border-t-4 border-blue-500"><h3 class="font-bold text-lg mb-4 flex items-center gap-2">🎂 Urodziny i Przeglądy</h3><div id="dash_birthdays" class="space-y-2"></div></div>
+                <!-- NOWY KAFEL: DO ROZLICZENIA Z TU (SKANY I GOTÓWKA) -->
+                <div class="lux-card rounded-2xl p-6 border-t-4 border-purple-500">
+                    <h3 class="font-bold text-lg mb-3 flex items-center justify-between text-purple-900">
+                        <span>📤 Rozliczenie z TU</span>
+                        <span id="dash_tuSettleCount" class="text-xs bg-purple-100 text-purple-800 font-bold px-2 py-0.5 rounded">0 do zrobienia</span>
+                    </h3>
+                    <p class="text-xs text-textMuted mb-3">Polisy wymagające wysyłki skanów lub przelania gotówki do TU:</p>
+                    <div id="dash_tuSettlementList" class="space-y-2.5 max-h-60 overflow-y-auto pr-1"></div>
+                </div>
+
+                <div class="lux-card rounded-2xl p-6 border-t-4 border-red-500">
+                    <h3 class="font-bold text-lg mb-4 flex items-center gap-2">⚠️ Zaległe raty i inspekcje AC</h3>
+                    <div id="dash_overdue" class="space-y-3 max-h-60 overflow-y-auto pr-1"></div>
+                </div>
+                
+                <div class="lux-card rounded-2xl p-6 border-t-4 border-goldAccent">
+                    <h3 class="font-bold text-lg mb-4 flex items-center gap-2">💸 Raty (najbliższe 7 dni)</h3>
+                    <div id="dash_upcoming" class="space-y-3 max-h-60 overflow-y-auto pr-1"></div>
+                </div>
             </div>
         </section>
 
-        <!-- KLIENCI -->
+        <!-- KLIENCI (Z WARTOŚCIĄ LTV PRZYPIS/PROWIZJA) -->
         <section id="tab-clients" class="space-y-6 hidden">
             <div class="flex flex-col sm:flex-row justify-between items-center gap-4"><h2 class="text-2xl font-bold">Baza Klientów</h2><button onclick="openClientModal()" class="bg-goldAccent hover:bg-goldHover text-white font-semibold px-5 py-2.5 rounded-xl shadow-md">+ Dodaj Klienta</button></div>
             <div class="lux-card rounded-2xl overflow-hidden shadow-sm">
-                <div class="p-4 border-b border-luxBorder bg-luxBg/50"><input type="text" id="searchClient" oninput="renderClients()" placeholder="Filtruj bazę..." class="bg-white border border-luxBorder rounded-xl px-4 py-2 w-full sm:w-96 focus:outline-none text-sm"></div>
-                <div class="overflow-x-auto"><table class="w-full text-left border-collapse"><thead><tr class="border-b border-luxBorder text-xs text-textMuted uppercase bg-luxBg/30"><th class="p-4">Klient / Firma</th><th class="p-4">PESEL / NIP</th><th class="p-4">Prawo Jazdy / Wiek</th><th class="p-4">Kontakt</th></tr></thead><tbody id="clientsTableBody" class="divide-y divide-luxBorder text-sm"></tbody></table></div>
+                <div class="p-4 border-b border-luxBorder bg-luxBg/50"><input type="text" id="searchClient" oninput="renderClients()" placeholder="Filtruj bazę klientów..." class="bg-white border border-luxBorder rounded-xl px-4 py-2 w-full sm:w-96 focus:outline-none text-sm"></div>
+                <div class="overflow-x-auto"><table class="w-full text-left border-collapse"><thead><tr class="border-b border-luxBorder text-xs text-textMuted uppercase bg-luxBg/30"><th class="p-4">Klient / Firma</th><th class="p-4">PESEL / NIP</th><th class="p-4">Wartość klienta (LTV)</th><th class="p-4">Kontakt</th></tr></thead><tbody id="clientsTableBody" class="divide-y divide-luxBorder text-sm"></tbody></table></div>
             </div>
         </section>
         
-        <!-- POLISY -->
+        <!-- POLISY (Z WYSZARZANIEM WYGASŁYCH I STATUSAMI PROWIZJI) -->
         <section id="tab-policies" class="space-y-6 hidden">
             <div class="flex flex-col sm:flex-row justify-between items-center gap-4"><h2 class="text-2xl font-bold">Zarządzanie Polisami</h2><button onclick="openPolicyModal()" class="bg-goldAccent hover:bg-goldHover text-white font-semibold px-5 py-2.5 rounded-xl shadow-md">+ Dodaj polisę</button></div>
             <div class="lux-card rounded-2xl overflow-hidden shadow-sm">
-                <div class="overflow-x-auto"><table class="w-full text-left border-collapse"><thead><tr class="border-b border-luxBorder text-xs text-textMuted uppercase bg-luxBg/30"><th class="p-4">TU / Nr Polisy</th><th class="p-4">Klient</th><th class="p-4">Okres i Przedmiot</th><th class="p-4 text-right">Składka / Prowizja</th></tr></thead><tbody id="policiesTableBody" class="divide-y divide-luxBorder text-sm"></tbody></table></div>
+                <div class="p-3 bg-luxBg/50 border-b border-luxBorder flex items-center justify-between text-xs font-semibold text-textMuted">
+                    <span>🟢 Prowizja 100% odebrana | 🟡 Część odebrana | 🔴 Oczekuje na wypłatę | Wyszarzone = Archiwalne/Wygasłe</span>
+                </div>
+                <div class="overflow-x-auto"><table class="w-full text-left border-collapse"><thead><tr class="border-b border-luxBorder text-xs text-textMuted uppercase bg-luxBg/30"><th class="p-4">TU / Nr Polisy</th><th class="p-4">Klient</th><th class="p-4">Okres i Przedmiot</th><th class="p-4 text-right">Składka Netto / Prowizja</th></tr></thead><tbody id="policiesTableBody" class="divide-y divide-luxBorder text-sm"></tbody></table></div>
             </div>
         </section>
 
@@ -235,9 +268,14 @@
             </div>
         </section>
 
-        <!-- ODNOWIENIA -->
+        <!-- ODNOWIENIA (Z MOŻLIWOŚCIĄ ARCHIWIZACJI KART) -->
         <section id="tab-renewals" class="space-y-6 hidden">
-            <h2 class="text-2xl font-bold text-textDark">Lejek Odnowień (&lt; 45 dni)</h2>
+            <div class="flex justify-between items-center">
+                <h2 class="text-2xl font-bold text-textDark">Lejek Odnowień (&lt; 45 dni)</h2>
+                <label class="text-xs font-bold text-textMuted cursor-pointer flex items-center">
+                    <input type="checkbox" id="kb_showArchived" onchange="renderDashboard()" class="mr-1.5"> Pokaż zarchiwizowane / zamknięte sprawy
+                </label>
+            </div>
             <div class="grid grid-cols-1 md:grid-cols-4 gap-4" id="kanbanBoard">
                 <div class="bg-gray-100 rounded-xl p-4 flex flex-col h-full border border-gray-200"><h3 class="font-bold text-gray-700 mb-3 text-sm uppercase">☎️ Do obdzwonienia</h3><div id="k_todo" class="space-y-3 flex-grow"></div></div>
                 <div class="bg-blue-50 rounded-xl p-4 flex flex-col h-full border border-blue-200"><h3 class="font-bold text-blue-700 mb-3 text-sm uppercase">✉️ Oferta wysłana</h3><div id="k_offer" class="space-y-3 flex-grow"></div></div>
@@ -248,9 +286,9 @@
 
         <!-- FINANSE -->
         <section id="tab-finances" class="space-y-6 hidden">
-            <h2 class="text-2xl font-bold">Statystyki Roczne (YOY)</h2>
+            <h2 class="text-2xl font-bold">Statystyki Roczne (YOY - Uwzględnia Odpisy)</h2>
             <div class="lux-card rounded-2xl overflow-hidden shadow-sm">
-                <div class="overflow-x-auto"><table class="w-full text-left border-collapse"><thead><tr class="border-b border-luxBorder text-xs text-textMuted uppercase bg-luxBg/30"><th class="p-4">Rok</th><th class="p-4 text-right">Przypis</th><th class="p-4 text-right">Prowizja Całk.</th><th class="p-4 text-right">Wypłacono (Rozliczone)</th><th class="p-4 text-right">Do Wypłaty</th></tr></thead><tbody id="yearlyStatsBody" class="divide-y divide-luxBorder text-sm"></tbody></table></div>
+                <div class="overflow-x-auto"><table class="w-full text-left border-collapse"><thead><tr class="border-b border-luxBorder text-xs text-textMuted uppercase bg-luxBg/30"><th class="p-4">Rok</th><th class="p-4 text-right">Przypis Netto</th><th class="p-4 text-right">Odpisy (Storno)</th><th class="p-4 text-right">Prowizja Całk.</th><th class="p-4 text-right">Wypłacono (TU)</th><th class="p-4 text-right">Do Wypłaty</th></tr></thead><tbody id="yearlyStatsBody" class="divide-y divide-luxBorder text-sm"></tbody></table></div>
             </div>
             
             <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mt-8">
@@ -268,9 +306,9 @@
             </div>
 
             <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4">
-                <div class="bg-green-50 p-4 rounded-xl border border-green-200"><span class="text-[10px] uppercase font-bold text-green-800">Prowizje (Opłacone raty)</span><p id="f_paidAmount" class="text-xl font-bold text-green-600 mt-1">0,00 PLN</p></div>
-                <div class="bg-amber-50 p-4 rounded-xl border border-amber-200"><span class="text-[10px] uppercase font-bold text-amber-800">Prowizje Oczekujące</span><p id="f_pendingAmount" class="text-xl font-bold text-amber-600 mt-1">0,00 PLN</p></div>
-                <div class="bg-blue-50 p-4 rounded-xl border border-blue-200"><span class="text-[10px] uppercase font-bold text-blue-800">Składki Opłacone</span><p id="f_premiumPaid" class="text-xl font-bold text-blue-600 mt-1">0,00 PLN</p></div>
+                <div class="bg-green-50 p-4 rounded-xl border border-green-200"><span class="text-[10px] uppercase font-bold text-green-800">Prowizje Wypłacone z TU</span><p id="f_paidAmount" class="text-xl font-bold text-green-600 mt-1">0,00 PLN</p></div>
+                <div class="bg-amber-50 p-4 rounded-xl border border-amber-200"><span class="text-[10px] uppercase font-bold text-amber-800">Prowizje Oczekujące z TU</span><p id="f_pendingAmount" class="text-xl font-bold text-amber-600 mt-1">0,00 PLN</p></div>
+                <div class="bg-blue-50 p-4 rounded-xl border border-blue-200"><span class="text-[10px] uppercase font-bold text-blue-800">Składki Opłacone Netto</span><p id="f_premiumPaid" class="text-xl font-bold text-blue-600 mt-1">0,00 PLN</p></div>
                 <div class="bg-red-50 p-4 rounded-xl border border-red-200"><span class="text-[10px] uppercase font-bold text-red-800">Składki Oczekujące</span><p id="f_premiumPending" class="text-xl font-bold text-red-600 mt-1">0,00 PLN</p></div>
             </div>
 
@@ -278,7 +316,7 @@
                 <div class="p-3 bg-luxBg/50 border-b border-luxBorder flex justify-between items-center">
                     <span class="text-xs font-bold text-textMuted uppercase">Lista polis i rat w wybranym okresie</span>
                 </div>
-                <div class="overflow-x-auto"><table class="w-full text-left border-collapse"><thead><tr class="border-b border-luxBorder text-xs text-textMuted uppercase bg-luxBg/30"><th class="p-4">TU / Polisa</th><th class="p-4">Klient</th><th class="p-4">Rata / Termin</th><th class="p-4">Status TU / Notatka</th><th class="p-4 text-right">Składka</th><th class="p-4 text-right">Prowizja</th></tr></thead><tbody id="financePendingBody" class="divide-y divide-luxBorder text-sm"></tbody></table></div>
+                <div class="overflow-x-auto"><table class="w-full text-left border-collapse"><thead><tr class="border-b border-luxBorder text-xs text-textMuted uppercase bg-luxBg/30"><th class="p-4">TU / Polisa</th><th class="p-4">Klient</th><th class="p-4">Rata / Termin</th><th class="p-4">Płatność / Status TU</th><th class="p-4 text-right">Składka</th><th class="p-4 text-right">Wypłacona Prowizja</th></tr></thead><tbody id="financePendingBody" class="divide-y divide-luxBorder text-sm"></tbody></table></div>
             </div>
         </section>
 
@@ -335,10 +373,10 @@
 
     <!-- MODALE -->
     
-    <!-- KARTA KLIENTA PEŁNA -->
+    <!-- KARTA KLIENTA PEŁNA (Z PODSUMOWANIEM WARTOŚCI LTV I ZŁOCENIEM AKTYWNYCH POLIS) -->
     <div id="clientFullModalOverlay" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-2 sm:p-4" onclick="if(event.target === this) closeClientFull()">
         <div class="bg-luxCard shadow-2xl modal-fullscreen rounded-2xl flex flex-col relative overflow-hidden mx-auto my-auto border border-luxBorder" onclick="event.stopPropagation()">
-            <div class="bg-luxBg border-b border-luxBorder px-6 py-4 flex justify-between items-center sticky top-0 z-10">
+            <div class="bg-luxBg border-b border-luxBorder px-6 py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sticky top-0 z-10">
                 <div>
                     <div class="flex items-center gap-2">
                         <h2 class="text-2xl font-bold text-textDark" id="cfm_name">-</h2>
@@ -349,7 +387,21 @@
                         <button onclick="copyToClipboard(document.getElementById('cfm_pesel').innerText.replace(/[^0-9]/g,''), 'PESEL/NIP')" class="text-xs bg-gray-200 hover:bg-gray-300 px-1.5 py-0.5 rounded font-bold" title="Kopiuj PESEL/NIP">📋</button>
                     </div>
                 </div>
-                <div class="flex items-center gap-3">
+
+                <!-- WARTOŚĆ KLIENTA (LTV) W NAGŁÓWKU -->
+                <div class="flex items-center gap-3 bg-white px-4 py-2 rounded-xl border border-luxBorder shadow-sm">
+                    <div>
+                        <span class="text-[9px] uppercase font-bold text-textMuted block">Przypis Netto Klienta</span>
+                        <span id="cfm_ltvPremium" class="text-base font-extrabold text-indigo-700">0,00 PLN</span>
+                    </div>
+                    <div class="w-px h-7 bg-luxBorder"></div>
+                    <div>
+                        <span class="text-[9px] uppercase font-bold text-green-800 block">Zarobiona Prowizja</span>
+                        <span id="cfm_ltvCommission" class="text-base font-extrabold text-green-600">0,00 PLN</span>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-2">
                     <button onclick="addCalendarEvent('client')" class="px-3 py-2 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-sm font-bold">📅 Google Cal</button>
                     <button onclick="toggleCfmEdit()" id="cfm_btnEdit" class="px-4 py-2 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg text-sm font-bold">Edytuj</button>
                     <button onclick="openOfferModal(null, currentOpenId)" class="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold">📋 Oferta</button>
@@ -394,7 +446,7 @@
                         </div>
                     </div>
 
-                    <!-- Kolumna 2: Garaż (Dane z dowodu) oraz Lokale (Pełne dane do wyceny majątku/firmy) -->
+                    <!-- Kolumna 2: Garaż oraz Lokale -->
                     <div class="space-y-6">
                         <!-- GARAŻ -->
                         <div>
@@ -434,7 +486,7 @@
                             <div id="cfm_vehiclesList" class="space-y-3 mt-3"></div>
                         </div>
 
-                        <!-- LOKALE / NIERUCHOMOŚCI / FIRMY (Rozbudowany moduł do kalkulacji majątkowej) -->
+                        <!-- LOKALE -->
                         <div>
                             <div class="flex justify-between items-center border-b border-luxBorder pb-2">
                                 <h3 class="font-bold text-lg text-textDark">Lokale / Majątek (Dane do wyceny)</h3>
@@ -463,30 +515,27 @@
                                     </div>
                                 </div>
                                 <div>
-                                    <label class="text-[10px] font-bold text-textMuted">Dokładny adres nieruchomości (Kod, Miasto, Ulica)</label>
+                                    <label class="text-[10px] font-bold text-textMuted">Dokładny adres nieruchomości</label>
                                     <input type="text" id="prop_address" placeholder="np. 83-330 Żukowo, ul. Gdańska 10/2" class="w-full border rounded p-1.5 bg-white">
                                 </div>
                                 <div class="grid grid-cols-3 gap-2">
                                     <div><label class="text-[10px] font-bold text-textMuted">Powierzchnia (m²)</label><input type="number" step="0.1" id="prop_area" placeholder="65" class="w-full border rounded p-1.5 bg-white"></div>
                                     <div><label class="text-[10px] font-bold text-textMuted">Rok budowy</label><input type="number" id="prop_year" placeholder="2015" class="w-full border rounded p-1.5 bg-white"></div>
-                                    <div>
-                                        <label class="text-[10px] font-bold text-textMuted">Kondygnacja / Piętro</label>
-                                        <input type="text" id="prop_floor" placeholder="np. Parter / 2 z 4" class="w-full border rounded p-1.5 bg-white" title="Dla mieszkań: Parter, Pośrednie lub Ostatnie">
-                                    </div>
+                                    <div><label class="text-[10px] font-bold text-textMuted">Kondygnacja / Piętro</label><input type="text" id="prop_floor" placeholder="np. Parter / 2 z 4" class="w-full border rounded p-1.5 bg-white"></div>
                                 </div>
                                 <div class="grid grid-cols-3 gap-2 bg-white p-2 rounded border border-green-200">
-                                    <div><label class="text-[9px] uppercase font-bold text-textMuted">SU Mury/Stałe (zł)</label><input type="number" id="prop_suWalls" placeholder="500000" class="w-full border rounded p-1 text-xs"></div>
-                                    <div><label class="text-[9px] uppercase font-bold text-textMuted">SU Ruchomości (zł)</label><input type="number" id="prop_suMovables" placeholder="50000" class="w-full border rounded p-1 text-xs"></div>
+                                    <div><label class="text-[9px] uppercase font-bold text-textMuted">SU Mury (zł)</label><input type="number" id="prop_suWalls" placeholder="500000" class="w-full border rounded p-1 text-xs"></div>
+                                    <div><label class="text-[9px] uppercase font-bold text-textMuted">SU Ruchomości</label><input type="number" id="prop_suMovables" placeholder="50000" class="w-full border rounded p-1 text-xs"></div>
                                     <div><label class="text-[9px] uppercase font-bold text-textMuted">SU OC w życiu pr.</label><input type="number" id="prop_suOc" placeholder="100000" class="w-full border rounded p-1 text-xs"></div>
                                 </div>
                                 <div>
-                                    <label class="text-[10px] font-bold text-textMuted">Cesja bankowa (Nazwa banku i NIP - jeśli kredyt)</label>
-                                    <input type="text" id="prop_cession" placeholder="Brak cesji lub np. PKO BP SA (NIP: 5250007738)" class="w-full border rounded p-1.5 bg-white text-xs">
+                                    <label class="text-[10px] font-bold text-textMuted">Cesja bankowa (Nazwa banku i NIP)</label>
+                                    <input type="text" id="prop_cession" placeholder="Brak lub np. PKO BP SA (NIP: 5250007738)" class="w-full border rounded p-1.5 bg-white text-xs">
                                 </div>
                                 <div class="grid grid-cols-2 gap-1.5 pt-1">
                                     <label class="text-xs font-semibold cursor-pointer"><input type="checkbox" id="prop_secDoors" class="mr-1"> 🚪 Drzwi antywłamaniowe</label>
                                     <label class="text-xs font-semibold cursor-pointer"><input type="checkbox" id="prop_secAlarm" class="mr-1"> 🚨 Alarm / Monitoring</label>
-                                    <label class="text-xs font-bold text-red-700 cursor-pointer"><input type="checkbox" id="prop_flammable" class="mr-1"> 🔥 Konstrukcja Palna (Drewno)</label>
+                                    <label class="text-xs font-bold text-red-700 cursor-pointer"><input type="checkbox" id="prop_flammable" class="mr-1"> 🔥 Konstrukcja Palna</label>
                                     <label class="text-xs font-bold text-blue-700 cursor-pointer"><input type="checkbox" id="prop_flood" class="mr-1"> 🌊 Teren Zalewowy</label>
                                 </div>
                                 <div class="flex gap-2 pt-2">
@@ -498,9 +547,12 @@
                         </div>
                     </div>
 
-                    <!-- Kolumna 3: Polisy -->
+                    <!-- Kolumna 3: Polisy (Sortowane chronologicznie, złocone aktywne, wyszarzone archiwalne) -->
                     <div class="space-y-6">
-                        <div class="flex justify-between items-center border-b border-luxBorder pb-2"><h3 class="font-bold text-lg text-textDark">Historia Polis</h3><button onclick="openPolicyModal(null, currentOpenId)" class="text-xs font-bold bg-goldAccent text-white px-2.5 py-1 rounded">+ Nowa Polisa</button></div>
+                        <div class="flex justify-between items-center border-b border-luxBorder pb-2">
+                            <h3 class="font-bold text-lg text-textDark">Historia Polis (Najnowsze wyżej)</h3>
+                            <button onclick="openPolicyModal(null, currentOpenId)" class="text-xs font-bold bg-goldAccent text-white px-2.5 py-1 rounded hover:bg-goldHover">+ Nowa Polisa</button>
+                        </div>
                         <div id="cfm_policiesList" class="space-y-3 mt-3"></div>
                         
                         <div class="border-b border-luxBorder pb-2 mt-8"><h3 class="font-bold text-lg text-textDark">Obce Polisy (Do przejęcia)</h3></div>
@@ -517,7 +569,7 @@
         </div>
     </div>
 
-    <!-- SZUFLADA POLISY -->
+    <!-- SZUFLADA POLISY (Z ODPISAMI, PER-RATA PROWIZJĄ I ROZLICZENIEM Z TU) -->
     <div id="policyDrawerOverlay" class="fixed inset-0 bg-black/20 backdrop-blur-sm z-50 hidden transition-opacity" onclick="closeDrawer('policy')"></div>
     <div id="policyDrawer" class="fixed top-0 right-0 h-full w-full max-w-md bg-luxCard shadow-2xl z-50 drawer-closed transition-transform duration-300 flex flex-col border-l border-luxBorder">
         <div class="p-6 border-b border-luxBorder bg-luxBg/50 relative">
@@ -535,7 +587,7 @@
         </div>
         <div class="p-6 flex-grow overflow-y-auto space-y-6 flex flex-col justify-between">
             <div>
-                <h3 class="font-bold text-lg border-b border-luxBorder pb-1 mb-3">Szczegóły i Rozliczenie</h3>
+                <h3 class="font-bold text-lg border-b border-luxBorder pb-1 mb-3">Szczegóły i Rozliczenie Operacyjne</h3>
                 <div class="space-y-3 text-sm">
                     <div class="grid grid-cols-3"><span class="text-textMuted">Klient:</span><span id="pd_clientName" class="col-span-2 font-medium text-goldAccent cursor-pointer hover:underline"></span></div>
                     <div class="grid grid-cols-3"><span class="text-textMuted">Przedmiot:</span><span id="pd_subject" class="col-span-2 font-medium">-</span></div>
@@ -544,40 +596,80 @@
                         <span class="text-textMuted font-bold">Status TU:</span>
                         <span class="col-span-2">
                             <select id="pd_settlementStatus" onchange="updatePolicySettlement(this.value)" class="w-full border border-luxBorder rounded-lg p-1.5 text-xs font-bold bg-white">
-                                <option value="nierozliczona">⏳ Nierozliczona z TU</option>
+                                <option value="nierozliczona">⏳ Nierozliczona prowizyjnie</option>
                                 <option value="rozliczona">✅ Rozliczona z TU (Wypłacona)</option>
-                                <option value="anulowana">❌ Wypowiedziana / Sprzedaż (Zamyka raty)</option>
+                                <option value="anulowana">❌ Wypowiedziana / Storno</option>
                             </select>
                         </span>
                     </div>
                 </div>
 
-                <h3 class="font-bold text-lg border-b border-luxBorder pb-1 mb-3 mt-6">Ryzyka i Prowizja (Ręczna korekta)</h3>
-                <div id="pd_risksList" class="space-y-2 text-sm bg-gray-50 border p-3 rounded-xl mb-4"></div>
-                
-                <div class="space-y-2.5 text-sm bg-luxBg p-3.5 rounded-xl border border-luxBorder">
-                    <div class="flex justify-between items-center"><span class="text-textMuted">Składka przypisana:</span><span id="pd_premium" class="font-bold">-</span></div>
+                <!-- ROZLICZENIE OPERACYJNE Z TU (SKANY I WPŁATA GOTÓWKI) -->
+                <div class="p-3.5 bg-purple-50 rounded-xl border border-purple-200 space-y-2 mt-4 text-xs">
+                    <p class="font-bold uppercase text-purple-900 border-b border-purple-200 pb-1">📤 Obowiązki agencyjne wobec TU</p>
+                    <div class="flex justify-between items-center pt-1">
+                        <label class="font-bold flex items-center cursor-pointer">
+                            <input type="checkbox" id="pd_scansSent" onchange="toggleTuAction('scans')" class="mr-2 w-4 h-4 accent-purple-700"> Wysłano skany dokumentów do TU
+                        </label>
+                    </div>
+                    <div class="flex justify-between items-center pt-1">
+                        <label class="font-bold flex items-center cursor-pointer">
+                            <input type="checkbox" id="pd_cashPaidToTu" onchange="toggleTuAction('cash')" class="mr-2 w-4 h-4 accent-emerald-700"> Rozliczono / Przelano gotówkę do TU
+                        </label>
+                    </div>
+                </div>
+
+                <!-- KAFELKI FINANSOWE: PRZYPIS, ODPIS I PRZYPIS NETTO -->
+                <h3 class="font-bold text-lg border-b border-luxBorder pb-1 mb-3 mt-6">Finanse i Odpis (Storno)</h3>
+                <div class="p-3.5 bg-luxBg rounded-xl border border-luxBorder space-y-3 text-sm">
+                    <div class="flex justify-between items-center"><span class="text-textMuted">Przypis pierwotny:</span><span id="pd_premiumRaw" class="font-semibold">-</span></div>
+                    
+                    <div class="border-t border-luxBorder pt-2 space-y-2">
+                        <div class="flex justify-between items-center">
+                            <label class="text-xs font-bold text-red-700">Odpis (Zwrot składki / Storno):</label>
+                            <input type="number" step="0.01" id="pd_odpisInput" onchange="saveOdpisFromDrawer()" placeholder="0.00" class="w-32 border border-red-300 bg-white p-1 rounded text-right font-bold text-red-600 text-xs">
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <label class="text-[10px] uppercase font-bold text-textMuted">Powód odpisu:</label>
+                            <select id="pd_odpisReason" onchange="saveOdpisFromDrawer()" class="text-xs border rounded p-1 bg-white">
+                                <option value="">-- Wybierz powód --</option>
+                                <option value="Sprzedaż pojazdu">Sprzedaż pojazdu</option>
+                                <option value="Wypowiedzenie art. 28">Wypowiedzenie art. 28</option>
+                                <option value="Podwójne ubezpieczenie">Podwójne ubezpieczenie</option>
+                                <option value="Rezygnacja klienta">Rezygnacja klienta</option>
+                                <option value="Korekta / Aneks">Korekta / Aneks</option>
+                            </select>
+                        </div>
+                        <div class="flex justify-between items-center bg-white p-2 rounded border border-gray-200">
+                            <span class="text-xs font-bold text-textDark">Przypis NETTO (do statystyk):</span>
+                            <span id="pd_premiumNet" class="font-extrabold text-indigo-700 text-base">0,00 PLN</span>
+                        </div>
+                    </div>
+
                     <div class="border-t border-luxBorder pt-2">
-                        <label class="text-[10px] uppercase font-bold text-green-800 block mb-1">Ostateczna Prowizja do statystyk (PLN):</label>
+                        <div class="flex justify-between items-center mb-1">
+                            <label class="text-[10px] uppercase font-bold text-green-800">Prowizja łączna polisy (PLN):</label>
+                            <span id="pd_commManualStatus" class="text-[9px] text-amber-800 font-bold"></span>
+                        </div>
                         <div class="flex gap-2">
                             <input type="number" step="0.01" id="pd_commInput" class="w-full border border-green-300 bg-white p-1.5 rounded-lg text-sm font-bold text-green-700">
                             <button onclick="saveDrawerCommissionOverride()" class="bg-green-600 hover:bg-green-700 text-white text-xs font-bold px-3 rounded-lg">Zapisz</button>
                         </div>
                     </div>
-                    <div>
-                        <label class="text-[10px] uppercase font-bold text-textMuted block mb-1">Notatka do prowizji / rozliczenia:</label>
-                        <input type="text" id="pd_commNoteInput" onchange="saveDrawerCommissionOverride()" placeholder="np. Korekta z rachunku TU -12 zł" class="w-full border border-luxBorder bg-white p-1.5 rounded-lg text-xs">
-                    </div>
                 </div>
-                
+
                 <div id="pd_tasksBox" class="mt-4 p-4 bg-red-50 rounded-xl border border-red-200 hidden">
                     <p class="text-xs font-bold text-red-800 uppercase border-b border-red-200 pb-1 mb-2">Zadania Po-Polisowe</p>
                     <label id="pd_taskAcContainer" class="text-sm font-bold flex items-center hidden"><input type="checkbox" id="pd_taskAc" onchange="togglePolicyTask('ac')" class="mr-2 w-4 h-4"> 📸 Zdjęcia do AC</label>
                     <label id="pd_taskOcContainer" class="text-sm font-bold flex items-center mt-1 hidden"><input type="checkbox" id="pd_taskOc" onchange="togglePolicyTask('oc')" class="mr-2 w-4 h-4"> ✉️ Wypowiedzenie OC wysłane</label>
                 </div>
 
+                <!-- HARMONOGRAM RAT Z ROZLICZANIEM PROWIZJI PER RATA I PRZYCISKIEM SMS -->
                 <div id="pd_installmentsBox" class="mt-4 p-4 bg-amber-50 rounded-xl border border-amber-200 hidden">
-                    <p class="text-xs font-bold text-amber-800 uppercase border-b border-amber-200 pb-1 mb-3">Harmonogram Rat (Odznaczaj opłacone)</p>
+                    <div class="flex justify-between items-center border-b border-amber-200 pb-1 mb-2">
+                        <p class="text-xs font-bold text-amber-900 uppercase">Harmonogram Rat i Prowizji TU</p>
+                        <span id="pd_commBalanceBadge" class="text-[10px] font-bold bg-white px-2 py-0.5 rounded border border-amber-300 text-amber-900">0/0 PLN</span>
+                    </div>
                     <div id="pd_installmentsList" class="space-y-3 text-sm"></div>
                 </div>
             </div>
@@ -630,7 +722,7 @@
                 </div>
             </div>
 
-            <!-- KROK 2 -->
+            <!-- KROK 2 (WZBOGACONY O FORMĘ PŁATNOŚCI: GOTÓWKA / PRZELEW) -->
             <div id="pStep2" class="space-y-4 hidden">
                 <div class="flex gap-4 p-3 bg-blue-50 border border-blue-200 rounded-xl mb-4">
                     <label class="flex items-center text-sm font-bold cursor-pointer"><input type="radio" name="p_salesType" value="new" checked class="mr-2 accent-indigo-600"> Nowy Biznes</label>
@@ -648,26 +740,34 @@
                         </select>
                     </div>
                 </div>
-                <div><label class="text-xs font-semibold text-textMuted">Nr Polisy</label><input type="text" id="p_number" class="w-full border p-2 rounded-xl text-sm mt-1 uppercase"></div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div><label class="text-xs font-semibold text-textMuted">Nr Polisy</label><input type="text" id="p_number" class="w-full border p-2 rounded-xl text-sm mt-1 uppercase"></div>
+                    <div>
+                        <label class="text-xs font-semibold text-textMuted">Forma płatności</label>
+                        <select id="p_paymentMethod" class="w-full border p-2 rounded-xl text-sm mt-1 bg-white font-bold">
+                            <option value="Przelew">Przelew (Klient płaci na konto TU)</option>
+                            <option value="Gotówka">💵 Gotówka (Pobrana przez Agenta)</option>
+                        </select>
+                    </div>
+                </div>
                 <div class="grid grid-cols-2 gap-3">
                     <div><label class="text-xs font-semibold text-textMuted">Początek ochrony</label><input type="date" id="p_dateStart" min="1900-01-01" max="2100-12-31" onchange="autoFillEndDate(this.value)" class="w-full border p-2 rounded-xl text-sm mt-1"></div>
                     <div><label class="text-xs font-semibold text-textMuted">Koniec ochrony</label><input type="date" id="p_dateEnd" min="1900-01-01" max="2100-12-31" class="w-full border p-2 rounded-xl text-sm mt-1"></div>
                 </div>
             </div>
 
-            <!-- KROK 3 (Automatyczne powiązanie z Garażem ORAZ z Lokalami klienta!) -->
+            <!-- KROK 3 -->
             <div id="pStep3" class="space-y-4 hidden">
-                <!-- Sekcja dla Komunikacji -->
                 <div id="p_vehicleSection" class="space-y-3 bg-blue-50/50 p-4 rounded-xl border border-blue-200">
                     <div class="flex justify-between items-center">
-                        <h4 class="text-xs font-bold text-blue-900 uppercase">🚗 Dane Pojazdu (Zapisuje do Garażu)</h4>
+                        <h4 class="text-xs font-bold text-blue-900 uppercase">🚗 Dane Pojazdu (Garaż)</h4>
                         <select id="p_garageSelect" onchange="fillVehicleFromGarage(this.value)" class="border border-blue-300 rounded-lg px-2 py-1 text-xs bg-white font-semibold text-blue-900">
                             <option value="">-- Wybierz z garażu klienta --</option>
                         </select>
                     </div>
                     <div class="grid grid-cols-2 gap-2">
                         <div>
-                            <label class="text-[10px] uppercase font-bold text-textMuted">Marka (wybierz lub wpisz nową)</label>
+                            <label class="text-[10px] uppercase font-bold text-textMuted">Marka</label>
                             <input list="popularBrandsList" id="p_carBrand" oninput="assembleSubjectString()" placeholder="np. Toyota" class="w-full border p-2 rounded-lg text-sm bg-white">
                         </div>
                         <div>
@@ -687,10 +787,9 @@
                     </div>
                 </div>
 
-                <!-- Sekcja dla Majątku i Firm (Automatycznie zapisuje lokal do bazy klienta!) -->
                 <div id="p_generalSection" class="space-y-3 bg-green-50/50 p-4 rounded-xl border border-green-200 hidden">
                     <div class="flex justify-between items-center">
-                        <h4 class="text-xs font-bold text-green-900 uppercase">🏠 Dane Lokalu / Mienia (Zapisuje do Lokali)</h4>
+                        <h4 class="text-xs font-bold text-green-900 uppercase">🏠 Dane Lokalu (Zapisuje do Lokali)</h4>
                         <select id="p_propertySelect" onchange="fillPropertyFromList(this.value)" class="border border-green-300 rounded-lg px-2 py-1 text-xs bg-white font-semibold text-green-900">
                             <option value="">-- Wybierz zapisany lokal klienta --</option>
                         </select>
@@ -703,7 +802,7 @@
                                 <option value="Dom jednorodzinny">Dom jednorodzinny</option>
                                 <option value="Dom w budowie">Dom w budowie</option>
                                 <option value="Lokal firmowy / Biuro">Lokal firmowy</option>
-                                <option value="Inne">Inne / Travel</option>
+                                <option value="Inne">Inne</option>
                             </select>
                         </div>
                         <div>
@@ -716,7 +815,7 @@
                         </div>
                     </div>
                     <div>
-                        <label class="text-[10px] uppercase font-bold text-textMuted">Dokładny adres ubezpieczanego lokalu / Opis przedmiotu</label>
+                        <label class="text-[10px] uppercase font-bold text-textMuted">Dokładny adres ubezpieczanego lokalu</label>
                         <input type="text" id="p_homeAddress" placeholder="np. 80-001 Gdańsk, ul. Długa 10/4" class="w-full border p-2 rounded-lg text-sm bg-white font-semibold">
                     </div>
                     <div>
@@ -732,7 +831,7 @@
                 </div>
             </div>
 
-            <!-- KROK 4 -->
+            <!-- KROK 4 (Z ODPISAMI I RATAMI DO 12) -->
             <div id="pStep4" class="space-y-4 hidden">
                 <div class="bg-gray-50 border border-gray-200 rounded-xl p-4">
                     <h4 class="font-bold text-sm text-textDark mb-3">🛡️ Kalkulator Ryzyk (Pomocniczy)</h4>
@@ -757,24 +856,47 @@
                     <div id="p_tempRisksList" class="space-y-2 mt-2 max-h-28 overflow-y-auto"></div>
                 </div>
 
-                <!-- Główne pola finansowe (Edytowalne z ręki!) -->
+                <!-- POLA FINANSOWE: PRZYPIS, ODPIS I PROWIZJA -->
                 <div class="p-3.5 bg-green-50/70 rounded-xl border border-green-300 space-y-3">
                     <div class="grid grid-cols-2 gap-3">
                         <div>
-                            <label class="text-xs font-bold text-textDark">Składka Całkowita (PLN)</label>
-                            <input type="number" step="0.01" id="p_premium" oninput="calcInstallmentsOnly()" class="w-full border border-gray-300 bg-white p-2 rounded-xl text-sm font-bold mt-1" placeholder="Możesz wpisać z ręki">
+                            <label class="text-xs font-bold text-textDark">Składka Pierwotna (PLN)</label>
+                            <input type="number" step="0.01" id="p_premium" oninput="recalcNetPremiumModal(); calcInstallmentsOnly();" class="w-full border border-gray-300 bg-white p-2 rounded-xl text-sm font-bold mt-1" placeholder="Możesz wpisać z ręki">
                         </div>
                         <div>
                             <div class="flex justify-between items-center">
-                                <label class="text-xs font-bold text-green-900">Prowizja do statystyk (PLN)</label>
+                                <label class="text-xs font-bold text-green-900">Prowizja łączna (PLN)</label>
                                 <span id="p_commManualBadge" class="hidden text-[9px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded font-bold uppercase">Ręczna</span>
                             </div>
                             <input type="number" step="0.01" id="p_commValue" oninput="markCommissionAsManual()" class="w-full border-2 border-green-500 bg-white p-2 rounded-xl text-sm font-extrabold text-green-700 mt-1" placeholder="Wpisz lub przelicz wyżej">
                         </div>
                     </div>
+
+                    <!-- POLE ODPISU W KREATORZE -->
+                    <div class="grid grid-cols-3 gap-2 bg-white p-2.5 rounded-lg border border-red-200 items-center">
+                        <div>
+                            <label class="text-[10px] uppercase font-bold text-red-700 block">Odpis / Zwrot (PLN)</label>
+                            <input type="number" step="0.01" id="p_odpis" oninput="recalcNetPremiumModal();" placeholder="0.00" class="w-full border border-red-300 rounded p-1 text-xs font-bold text-red-600">
+                        </div>
+                        <div>
+                            <label class="text-[10px] uppercase font-bold text-textMuted block">Powód odpisu</label>
+                            <select id="p_odpisReasonSelect" class="w-full border rounded p-1 text-xs bg-white">
+                                <option value="">Brak odpisu</option>
+                                <option value="Sprzedaż pojazdu">Sprzedaż pojazdu</option>
+                                <option value="Wypowiedzenie art. 28">Wypowiedzenie art. 28</option>
+                                <option value="Podwójne ubezpieczenie">Podwójne ubezpieczenie</option>
+                                <option value="Rezygnacja klienta">Rezygnacja klienta</option>
+                            </select>
+                        </div>
+                        <div class="text-right">
+                            <span class="text-[10px] text-textMuted uppercase font-bold block">Składka Netto:</span>
+                            <span id="p_premiumNetDisplay" class="font-extrabold text-indigo-700 text-sm">0,00 PLN</span>
+                        </div>
+                    </div>
+
                     <div>
                         <label class="text-[10px] uppercase font-bold text-textMuted">Notatka do prowizji / rozliczenia (Opcjonalnie)</label>
-                        <input type="text" id="p_commNote" placeholder="np. Kwota wpisana z rachunku TU / Inna stawka" class="w-full border border-gray-300 bg-white p-1.5 rounded-lg text-xs mt-0.5">
+                        <input type="text" id="p_commNote" placeholder="np. Kwota z rachunku TU / Inna stawka" class="w-full border border-gray-300 bg-white p-1.5 rounded-lg text-xs mt-0.5">
                     </div>
                 </div>
 

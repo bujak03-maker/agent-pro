@@ -111,7 +111,7 @@ function syncAndRender(uploadToCloud = true) {
     }
 }
 
-// ================= 3. FUNKCJE POMOCNICZE I KOPIOWANIE =================
+// ================= 3. FUNKCJE POMOCNICZE I OBLICZENIOWE =================
 function copyToClipboard(text, label = "Dane") {
     let clean = String(text || "").trim();
     if(!clean || clean === "-" || clean === "PESEL / NIP: -") return;
@@ -140,7 +140,106 @@ function calculateYears(dateString) {
     return years; 
 }
 
-// Zabezpieczone przed rokiem 0002 podczas wpisywania daty z klawiatury
+function isPolicyArchivedOrExpired(p) {
+    if (p.settlementStatus === 'anulowana') return true;
+    if (p.dateEnd) {
+        let endD = new Date(p.dateEnd);
+        endD.setHours(23, 59, 59, 999);
+        if (endD < new Date()) return true;
+    }
+    return false;
+}
+
+function getPolicyNetPremium(p) {
+    let raw = parseFloat(p.premium) || 0;
+    let odpis = parseFloat(p.odpis) || 0;
+    return Math.max(0, raw - odpis);
+}
+
+function getFirstInstallmentAmount(p) {
+    let totalPrem = getPolicyNetPremium(p);
+    if(!p.installments || p.installments <= 1) return totalPrem;
+    if(p.installmentDates) {
+        let sumOthers = 0;
+        for(let i = 2; i <= p.installments; i++) {
+            if(p.installmentDates[i]) sumOthers += parseFloat(p.installmentDates[i].amount) || 0;
+        }
+        let firstAmt = totalPrem - sumOthers;
+        if(firstAmt > 0) return firstAmt;
+    }
+    return totalPrem / p.installments;
+}
+
+// Podsumowanie prowizji z rat (ile wypłacono wg wpisów TU, ile zostało)
+function getPolicyCommissionBreakdown(p) {
+    let totalComm = parseFloat(p.commissionAmt) || 0;
+    let paidFromTu = 0;
+
+    if (p.firstPaymentPaid) {
+        paidFromTu += parseFloat(p.firstPaymentComm) || (p.installments > 1 ? totalComm / p.installments : totalComm);
+    }
+
+    if (p.installments > 1 && p.installmentDates) {
+        for(let i = 2; i <= p.installments; i++) {
+            let inst = p.installmentDates[i];
+            if (inst && inst.paid) {
+                paidFromTu += parseFloat(inst.commTu) || (totalComm / p.installments);
+            }
+        }
+    }
+
+    let remaining = Math.max(0, totalComm - paidFromTu);
+    let statusColor = "red";
+    if (paidFromTu >= totalComm && totalComm > 0) statusColor = "green";
+    else if (paidFromTu > 0) statusColor = "yellow";
+
+    return { total: totalComm, paid: paidFromTu, remaining: remaining, statusColor: statusColor };
+}
+
+// Obliczenie wartości klienta (LTV: przypis netto + zarobiona prowizja)
+function calculateClientLtv(clientId) {
+    let cPolicies = policiesList.filter(p => String(p.clientId) === String(clientId));
+    let totalNetPrem = 0;
+    let totalEarnedComm = 0;
+
+    cPolicies.forEach(p => {
+        if (p.settlementStatus === 'anulowana') {
+            if (p.firstPaymentPaid) {
+                totalNetPrem += getFirstInstallmentAmount(p);
+                totalEarnedComm += parseFloat(p.firstPaymentComm) || (parseFloat(p.commissionAmt) || 0) / (p.installments || 1);
+            }
+            return;
+        }
+        totalNetPrem += getPolicyNetPremium(p);
+        let cb = getPolicyCommissionBreakdown(p);
+        totalEarnedComm += cb.paid;
+    });
+
+    return { netPremium: totalNetPrem, earnedComm: totalEarnedComm };
+}
+
+// Generator SMS / WhatsApp z gotowym przypomnieniem
+function sendPaymentReminderSms(policyId, rataIdx) {
+    let p = policiesList.find(x => String(x.id) === String(policyId));
+    if(!p) return;
+    let c = clientsList.find(x => String(x.id) === String(p.clientId));
+    let cName = c ? c.name.split(' ')[0] : "Kliencie";
+
+    let amt = 0, date = "";
+    if (rataIdx === 1) {
+        amt = getFirstInstallmentAmount(p);
+        date = p.firstPaymentDate || p.dateStart;
+    } else if (p.installmentDates && p.installmentDates[rataIdx]) {
+        amt = p.installmentDates[rataIdx].amount;
+        date = p.installmentDates[rataIdx].date;
+    }
+
+    let rataTxt = p.installments > 1 ? `raty (${rataIdx}/${p.installments})` : `składki`;
+    let msg = `Dzień dobry ${cName}, przypominam o zbliżającym się terminie płatności ${rataTxt} za polisę ${p.insurer} (${p.subject || ''}) w kwocie ${formatPLN(amt)}, płatnej do dnia ${date}. W razie pytań pozostaję do dyspozycji. Pozdrawiam, Paweł Bujak (Superpolisa)`;
+
+    copyToClipboard(msg, "Szablon SMS / WhatsApp");
+}
+
 function autoFillEndDate(startStr) { 
     if(!startStr || startStr.length !== 10) return; 
     let parts = startStr.split('-');
@@ -184,7 +283,6 @@ function parsePeselToDateString(val) {
     return null; 
 }
 
-// Zarządzanie bazą marek pojazdów
 function renderBrandsDatalist() {
     let dl = document.getElementById('popularBrandsList');
     let tbody = document.getElementById('brandsLibraryBody');
@@ -341,7 +439,7 @@ function renderTasks() {
 
 function editMonthlyGoal() {
     let currentGoal = monthlyGoalAmount || 10000;
-    let g = prompt("Podaj nowy cel przypisu miesięcznego (PLN):", currentGoal);
+    let g = prompt("Podaj nowy cel przypisu netto miesięcznego (PLN):", currentGoal);
     if(g !== null) {
         let parsed = parseFloat(g.replace(/\s+/g, '').replace(',', '.'));
         if(!isNaN(parsed) && parsed > 0) {
@@ -354,7 +452,56 @@ function editMonthlyGoal() {
     }
 }
 
-// ================= 5. WYDRUK PLANU DNIA =================
+// ================= 5. ROZLICZENIE Z TU, PORTFEL GOTÓWKOWY I ZDEJMOWANIE SPRAW =================
+function markRenewalAsHandled(policyId) {
+    let p = policiesList.find(x => String(x.id) === String(policyId));
+    if(p) {
+        p.renewalHandled = true;
+        p.renewalStatus = "won";
+        syncAndRender();
+        let toast = document.getElementById('copyToast');
+        if(toast) {
+            toast.innerText = `✅ Wznowienie oznaczone jako załatwione i zdjęte z pulpitu!`;
+            toast.classList.remove('hidden');
+            setTimeout(() => toast.classList.add('hidden'), 2000);
+        }
+    }
+}
+
+function toggleTuAction(type, policyId = null) {
+    let targetId = policyId || currentOpenPolicyId;
+    let p = policiesList.find(x => String(x.id) === String(targetId));
+    if(!p) return;
+
+    if (type === 'scans') {
+        p.scansSent = !p.scansSent;
+    } else if (type === 'cash') {
+        p.cashPaidToTu = !p.cashPaidToTu;
+    }
+
+    syncAndRender();
+    if(currentOpenPolicyId && String(currentOpenPolicyId) === String(targetId)) {
+        populateDrawer('policy', p.id);
+    }
+}
+
+function archiveKanbanCard(policyId) {
+    let p = policiesList.find(x => String(x.id) === String(policyId));
+    if(p) {
+        p.renewalArchived = true;
+        syncAndRender();
+    }
+}
+
+function unarchiveKanbanCard(policyId) {
+    let p = policiesList.find(x => String(x.id) === String(policyId));
+    if(p) {
+        p.renewalArchived = false;
+        syncAndRender();
+    }
+}
+
+// ================= 6. WYDRUK PLANU DNIA =================
 function printTodayPlan() {
     let today = new Date();
     today.setHours(0,0,0,0);
@@ -371,8 +518,12 @@ function printTodayPlan() {
         let cName = c ? c.name : "Klient";
         let cPhone = (c && c.phone) ? ` | tel. ${c.phone}` : "";
 
-        if(p.reqAc && !p.acDone) tasksHtml += `<div class="py-1 border-b border-gray-100">☐ <b>[ZDJĘCIA AC / INSPEKCJA]</b> ${cName}${cPhone} – ${p.insurer} (${p.subject})</div>`;
-        if(p.reqOc && !p.ocDone) tasksHtml += `<div class="py-1 border-b border-gray-100">☐ <b>[WYPOWIEDZENIE]</b> ${cName}${cPhone} – ${p.insurer} (${p.subject})</div>`;
+        if(!p.scansSent) tasksHtml += `<div class="py-1 border-b border-gray-100">☐ <b>[SKANY DO TU]</b> ${p.insurer} (${p.subject || ''}) – Klient: ${cName}${cPhone}</div>`;
+        if(p.paymentMethod === 'Gotówka' && p.firstPaymentPaid && !p.cashPaidToTu) {
+            tasksHtml += `<div class="py-1 border-b border-gray-100 text-emerald-800">☐ <b>[WPŁATA GOTÓWKI DO TU]</b> ${p.insurer} (${formatPLN(getFirstInstallmentAmount(p))}) – Klient: ${cName}</div>`;
+        }
+        if(p.reqAc && !p.acDone) tasksHtml += `<div class="py-1 border-b border-gray-100">☐ <b>[ZDJĘCIA AC / INSPEKCJA]</b> ${cName}${cPhone} – ${p.insurer} (${p.subject || ''})</div>`;
+        if(p.reqOc && !p.ocDone) tasksHtml += `<div class="py-1 border-b border-gray-100">☐ <b>[WYPOWIEDZENIE]</b> ${cName}${cPhone} – ${p.insurer} (${p.subject || ''})</div>`;
 
         if(p.firstPaymentDate && !p.firstPaymentPaid) {
             let dFP = new Date(p.firstPaymentDate);
@@ -395,11 +546,11 @@ function printTodayPlan() {
             }
         }
 
-        if(p.dateEnd) {
+        if(p.dateEnd && !p.renewalHandled) {
             let dEnd = new Date(p.dateEnd);
             let diffDays = Math.ceil((dEnd - today) / (1000 * 60 * 60 * 24));
             if(diffDays >= 0 && diffDays <= 30) {
-                renewalsHtml += `<div class="py-1 border-b border-gray-100">☐ <b>[Koniec za ${diffDays} dni]</b> ${cName}${cPhone} – ${p.insurer} | ${p.subject}</div>`;
+                renewalsHtml += `<div class="py-1 border-b border-gray-100">☐ <b>[Koniec za ${diffDays} dni]</b> ${cName}${cPhone} – ${p.insurer} | ${p.subject || ''}</div>`;
             }
         }
     });
@@ -451,7 +602,7 @@ function printTodayPlan() {
         notesAndTasksHtml += `<div class="font-bold mt-2 mb-1">Notatki podręczne:</div><div>${quickNotesText}</div>`;
     }
 
-    document.getElementById('print_tasksList').innerHTML = tasksHtml || '<p class="text-gray-400 italic">Brak zaległych zadań.</p>';
+    document.getElementById('print_tasksList').innerHTML = tasksHtml || '<p class="text-gray-400 italic">Brak zaległych zadań i rozliczeń.</p>';
     document.getElementById('print_installmentsList').innerHTML = instHtml || '<p class="text-gray-400 italic">Brak rat.</p>';
     document.getElementById('print_renewalsList').innerHTML = renewalsHtml || '<p class="text-gray-400 italic">Brak wznowień.</p>';
     document.getElementById('print_inspectionsList').innerHTML = inspHtml || '<p class="text-gray-400 italic">Brak przeglądów.</p>';
@@ -461,7 +612,7 @@ function printTodayPlan() {
     window.print();
 }
 
-// ================= 6. KLIENCI, GARAŻ (DOWÓD REJ.), LOKALE (MAJĄTEK / FIRMA) =================
+// ================= 7. KLIENCI, GARAŻ, LOKALE =================
 function saveNewClient() {
     let name = document.getElementById('addName').value.trim(); 
     let pesel = document.getElementById('addPesel').value.trim();
@@ -502,8 +653,7 @@ function renderClients() {
         return;
     }
     filtered.forEach(c => {
-        let age = c.birth ? calculateYears(c.birth) + " lat" : "-"; 
-        let licenseStr = c.licenseDate ? `<span class="text-goldAccent font-semibold">${c.licenseDate}</span>` : `-`;
+        let ltv = calculateClientLtv(c.id);
         let icon = c.nip ? '🏢' : '👤';
         let idStr = c.pesel ? `PESEL: ${c.pesel}` : `NIP: ${c.nip || '-'}`;
         let rawIdToCopy = c.pesel || c.nip || '';
@@ -515,7 +665,10 @@ function renderClients() {
                     ${idStr}
                     ${rawIdToCopy ? `<button onclick="event.stopPropagation(); copyToClipboard('${rawIdToCopy}', 'PESEL/NIP')" class="ml-1.5 text-[10px] bg-gray-100 hover:bg-gray-200 px-1.5 py-0.5 rounded font-sans font-bold" title="Kopiuj">📋</button>` : ''}
                 </td>
-                <td class="p-4 text-textMuted text-xs">P.J.: ${licenseStr}<br>Wiek: ${age}</td>
+                <td class="p-4 text-xs">
+                    <span class="font-extrabold text-indigo-700 block">${formatPLN(ltv.netPremium)}</span>
+                    <span class="text-green-700 font-bold text-[11px]">Prowizja: ${formatPLN(ltv.earnedComm)}</span>
+                </td>
                 <td class="p-4 text-textMuted text-xs">📞 ${c.phone || '-'}<br>✉️ ${c.email || '-'}</td>
             </tr>`;
     });
@@ -536,6 +689,13 @@ function populateClientFull(id) {
     document.getElementById('cv_address').innerText = c.address || "-";
     document.getElementById('cv_source').innerText = c.source || "-";
     
+    // Oblicz i wyświetl podsumowanie wartości klienta (LTV)
+    let ltv = calculateClientLtv(c.id);
+    let ltvPremEl = document.getElementById('cfm_ltvPremium');
+    let ltvCommEl = document.getElementById('cfm_ltvCommission');
+    if(ltvPremEl) ltvPremEl.innerText = formatPLN(ltv.netPremium);
+    if(ltvCommEl) ltvCommEl.innerText = formatPLN(ltv.earnedComm);
+
     document.getElementById('cfm_viewMode').classList.remove('hidden'); 
     document.getElementById('cfm_editMode').classList.add('hidden'); 
     document.getElementById('cfm_btnEdit').innerText = "Edytuj";
@@ -592,7 +752,7 @@ function deleteCurrentClient() {
     } 
 }
 
-// GARAŻ: Zapis i edycja pojazdu z pełnymi danymi z dowodu rejestracyjnego
+// GARAŻ
 function saveVehicle() { 
     let brand = document.getElementById('v_brand').value.trim(); 
     let model = document.getElementById('v_model').value.trim();
@@ -716,7 +876,7 @@ function renderClientVehicles(clientId) {
     }); 
 }
 
-// LOKALE / NIERUCHOMOŚCI / FIRMY: Pełny zapis, edycja i kafelki z danymi do wyceny
+// LOKALE
 function saveProperty() { 
     let t = document.getElementById('prop_type').value; 
     let a = document.getElementById('prop_address').value.trim(); 
@@ -886,6 +1046,7 @@ function renderExternalPolicies(clientId) {
     });
 }
 
+// POLISY W KARCIE KLIENTA (SORTOWANIE OD NAJŚWIEŻSZYCH, ZŁOCENIE AKTYWNYCH, WYSZARZANIE ARCHIWALNYCH)
 function renderClientPolicies(clientId) { 
     let cPolicies = policiesList.filter(p => String(p.clientId) === String(clientId)); 
     let pContainer = document.getElementById('cfm_policiesList'); 
@@ -895,36 +1056,48 @@ function renderClientPolicies(clientId) {
         pContainer.innerHTML = "<p class='text-xs text-textMuted'>Brak polis.</p>"; 
         return;
     }
+
+    // Sortowanie: najnowsze na górze
+    cPolicies.sort((a,b) => new Date(b.dateStart || 0) - new Date(a.dateStart || 0));
+
     let today = new Date(); 
     let nextWeek = new Date(); 
     nextWeek.setDate(today.getDate() + 7); 
+
     cPolicies.forEach(p => { 
+        let isArchived = isPolicyArchivedOrExpired(p);
         let alertHtml = ''; 
-        if(p.firstPaymentDate && !p.firstPaymentPaid && new Date(p.firstPaymentDate) <= nextWeek && p.settlementStatus !== 'anulowana') {
+        if(!isArchived && p.firstPaymentDate && !p.firstPaymentPaid && new Date(p.firstPaymentDate) <= nextWeek) {
             alertHtml = `<div class="mt-1 text-[10px] text-red-600 font-bold animate-pulse">⚠️ Rata / Wpłata!</div>`; 
         }
-        let setBadge = "";
-        if(p.settlementStatus === 'rozliczona') setBadge = `<span class="text-[9px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded ml-1 font-bold">✅ Rozliczona</span>`;
-        else if(p.settlementStatus === 'anulowana') setBadge = `<span class="text-[9px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded ml-1 font-bold">❌ Wypowiedziana</span>`;
-        else setBadge = `<span class="text-[9px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded ml-1 font-bold">⏳ Nierozliczona</span>`;
+
+        let cb = getPolicyCommissionBreakdown(p);
+        let statusBadge = "";
+        if(p.settlementStatus === 'anulowana') statusBadge = `<span class="text-[9px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded ml-1 font-bold">❌ Wypowiedziana</span>`;
+        else if(isArchived) statusBadge = `<span class="text-[9px] bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded ml-1 font-bold">Archiwalna</span>`;
+        else statusBadge = `<span class="text-[9px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded ml-1 font-bold">⭐ Aktywna</span>`;
+
+        let cardClass = isArchived 
+            ? "policy-archived p-3 rounded-xl border border-gray-300 flex justify-between items-start cursor-pointer transition-all"
+            : "bg-luxBg p-3 rounded-xl border-l-4 border-goldAccent shadow-sm flex justify-between items-start cursor-pointer hover:border-goldHover transition-all";
 
         pContainer.innerHTML += `
-            <div onclick="openDrawer('policy', '${p.id}')" class="bg-luxBg p-3 rounded-xl border border-luxBorder flex justify-between items-start cursor-pointer hover:border-goldAccent transition-all">
+            <div onclick="openDrawer('policy', '${p.id}')" class="${cardClass}">
                 <div>
-                    <span class="text-xs font-bold text-goldAccent uppercase">${p.insurer} ${setBadge}</span>
+                    <span class="text-xs font-bold ${isArchived ? 'text-gray-600' : 'text-goldAccent'} uppercase">${p.insurer} ${statusBadge}</span>
                     <p class="text-sm font-semibold text-textDark">${p.type} <span class="text-xs text-textMuted font-normal">(${p.subject || '-'})</span></p>
-                    <p class="text-xs text-green-700 font-bold mt-0.5">Prowizja: ${formatPLN(p.commissionAmt)}</p>
+                    <p class="text-xs text-green-700 font-bold mt-0.5">Prowizja odebrana: ${formatPLN(cb.paid)} / ${formatPLN(cb.total)}</p>
                     ${alertHtml}
                 </div>
                 <div class="text-right">
                     <span class="text-xs text-textMuted block -mb-1">Koniec:</span>
-                    <span class="text-sm font-bold text-textDark">${p.dateEnd || '-'}</span>
+                    <span class="text-sm font-bold ${isArchived ? 'text-gray-500' : 'text-textDark'}">${p.dateEnd || '-'}</span>
                 </div>
             </div>`; 
     }); 
 }
 
-// ================= 7. KREATOR POLISY (AUTOMAT GARAŻU I LOKALI ORAZ RĘCZNA PROWIZJA) =================
+// ================= 8. TABELA POLIS, KREATOR I RĘCZNA PROWIZJA =================
 function renderPolicies() {
     const tbody = document.getElementById('policiesTableBody'); 
     if(!tbody) return; 
@@ -933,28 +1106,39 @@ function renderPolicies() {
         tbody.innerHTML = `<tr><td colspan="4" class="p-8 text-center text-textMuted">Brak polis.</td></tr>`;
         return;
     }
+
     policiesList.slice().sort((a,b) => new Date(b.dateStart || 0) - new Date(a.dateStart || 0)).forEach(p => {
         let c = clientsList.find(x => String(x.id) === String(p.clientId)); 
+        let isArchived = isPolicyArchivedOrExpired(p);
+        let cb = getPolicyCommissionBreakdown(p);
+        let netPrem = getPolicyNetPremium(p);
+
+        let commIndicator = "";
+        if(cb.statusColor === 'green') commIndicator = `<span class="inline-block w-2.5 h-2.5 rounded-full bg-green-500 mr-1" title="Prowizja 100% odebrana"></span>`;
+        else if(cb.statusColor === 'yellow') commIndicator = `<span class="inline-block w-2.5 h-2.5 rounded-full bg-amber-500 mr-1" title="Część prowizji odebrana"></span>`;
+        else commIndicator = `<span class="inline-block w-2.5 h-2.5 rounded-full bg-red-500 mr-1" title="Prowizja jeszcze nieodebrana"></span>`;
+
         let instText = p.installments > 1 ? `<span class="text-[10px] uppercase font-bold text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded ml-1">${p.installments} rat</span>` : "";
         let newBizBadge = p.salesType === 'renewal' ? `<span class="text-[9px] bg-blue-100 text-blue-700 px-1 rounded ml-1 uppercase">Wznowienie</span>` : `<span class="text-[9px] bg-green-100 text-green-700 px-1 rounded ml-1 uppercase">Nowa</span>`;
         
-        let setBadge = "";
-        if(p.settlementStatus === 'rozliczona') setBadge = `<span class="text-[9px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded ml-1 font-bold">✅ Rozliczona</span>`;
-        else if(p.settlementStatus === 'anulowana') setBadge = `<span class="text-[9px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded ml-1 font-bold">❌ Wypowiedziana</span>`;
-        else setBadge = `<span class="text-[9px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded ml-1 font-bold">⏳ Nierozliczona</span>`;
+        let rowClass = isArchived ? "policy-archived cursor-pointer" : "hover:bg-luxBg/60 transition-all cursor-pointer border-l-4 border-transparent hover:border-goldAccent";
 
         tbody.innerHTML += `
-            <tr class="hover:bg-luxBg/60 transition-all cursor-pointer border-l-4 border-transparent hover:border-goldAccent" onclick="openDrawer('policy', '${p.id}')">
+            <tr class="${rowClass}" onclick="openDrawer('policy', '${p.id}')">
                 <td class="p-4">
-                    <span class="font-bold text-textDark">${p.insurer} ${newBizBadge} ${setBadge}</span><br>
+                    <span class="font-bold text-textDark">${commIndicator}${p.insurer} ${newBizBadge}</span><br>
                     <span class="text-xs font-mono text-textMuted">${p.number || 'Brak nr'}</span>
                     ${p.number ? `<button onclick="event.stopPropagation(); copyToClipboard('${p.number}', 'Nr polisy')" class="ml-1 text-[10px] bg-gray-100 px-1 rounded">📋</button>` : ''}
                 </td>
                 <td class="p-4 font-semibold text-goldAccent hover:underline" onclick="event.stopPropagation(); openClientFull('${p.clientId}')">${c ? c.name : "Nieznany"}</td>
-                <td class="p-4 text-textMuted text-xs">Okres: <span class="font-bold text-textDark">${p.dateStart || '-'} <span class="font-normal mx-1">do</span> <span class="text-red-500">${p.dateEnd || '-'}</span></span><br>Przedmiot: ${p.subject || '-'}</td>
+                <td class="p-4 text-textMuted text-xs">
+                    Okres: <span class="font-bold text-textDark">${p.dateStart || '-'} <span class="font-normal mx-1">do</span> <span class="${isArchived ? 'text-gray-500' : 'text-red-500'}">${p.dateEnd || '-'}</span></span><br>
+                    Przedmiot: ${p.subject || '-'}
+                </td>
                 <td class="p-4 text-right">
-                    <span class="font-bold text-textDark block">${formatPLN(p.premium)} ${instText}</span>
-                    <span class="text-xs font-bold text-green-700">Prowizja: ${formatPLN(p.commissionAmt)}</span>
+                    <span class="font-bold text-textDark block">${formatPLN(netPrem)} ${instText}</span>
+                    ${p.odpis > 0 ? `<span class="text-[10px] text-red-600 block">Odpis: -${formatPLN(p.odpis)}</span>` : ''}
+                    <span class="text-xs font-bold text-green-700">Wypłacono: ${formatPLN(cb.paid)} / ${formatPLN(cb.total)}</span>
                 </td>
             </tr>`;
     });
@@ -978,11 +1162,14 @@ function populatePolicyModal(editId = null, prefillClientId = null) {
     document.getElementById('p_clientNotFoundBox').classList.add('hidden');
     document.getElementById('p_btnNext').disabled = true;
 
-    ['p_quickName', 'p_quickBirth', 'p_quickLicense', 'p_number', 'p_dateStart', 'p_dateEnd', 'p_carBrand', 'p_carModel', 'p_carPlate', 'p_carVin', 'p_propArea', 'p_propYear', 'p_propCession', 'p_homeAddress', 'p_riskNameInput', 'p_riskPremInput', 'p_riskPctInput', 'p_premium', 'p_commValue', 'p_commNote', 'p_firstPaymentDate'].forEach(id => {
+    ['p_quickName', 'p_quickBirth', 'p_quickLicense', 'p_number', 'p_dateStart', 'p_dateEnd', 'p_carBrand', 'p_carModel', 'p_carPlate', 'p_carVin', 'p_propArea', 'p_propYear', 'p_propCession', 'p_homeAddress', 'p_riskNameInput', 'p_riskPremInput', 'p_riskPctInput', 'p_premium', 'p_odpis', 'p_commValue', 'p_commNote', 'p_firstPaymentDate'].forEach(id => {
         let el = document.getElementById(id);
         if(el) el.value = "";
     });
     if(document.getElementById('p_propType')) document.getElementById('p_propType').value = "Mieszkanie";
+    if(document.getElementById('p_odpisReasonSelect')) document.getElementById('p_odpisReasonSelect').value = "";
+    if(document.getElementById('p_paymentMethod')) document.getElementById('p_paymentMethod').value = "Przelew";
+    
     document.getElementById('p_reqAc').checked = false;
     document.getElementById('p_reqOc').checked = false;
     document.getElementById('p_installments').value = "1";
@@ -1013,6 +1200,7 @@ function populatePolicyModal(editId = null, prefillClientId = null) {
             handlePolicyTypeChange();
 
             document.getElementById('p_number').value = p.number || ""; 
+            if(document.getElementById('p_paymentMethod')) document.getElementById('p_paymentMethod').value = p.paymentMethod || "Przelew";
             document.getElementById('p_dateStart').value = p.dateStart || ""; 
             document.getElementById('p_dateEnd').value = p.dateEnd || "";
             
@@ -1029,6 +1217,8 @@ function populatePolicyModal(editId = null, prefillClientId = null) {
             document.getElementById('p_installments').value = p.installments || 1; 
             document.getElementById('p_firstPaymentDate').value = p.firstPaymentDate || "";
             document.getElementById('p_commNote').value = p.commNote || "";
+            document.getElementById('p_odpis').value = p.odpis || "";
+            if(document.getElementById('p_odpisReasonSelect')) document.getElementById('p_odpisReasonSelect').value = p.odpisReason || "";
             
             if(p.risks && Array.isArray(p.risks)) {
                 tempPolicyRisks = JSON.parse(JSON.stringify(p.risks));
@@ -1041,6 +1231,7 @@ function populatePolicyModal(editId = null, prefillClientId = null) {
                 isManualCommission = true;
                 document.getElementById('p_commManualBadge').classList.remove('hidden');
             }
+            recalcNetPremiumModal();
             calcInstallmentsOnly(p.installmentDates);
         }
     } else if(prefillClientId) { 
@@ -1060,7 +1251,6 @@ function populatePolicyModal(editId = null, prefillClientId = null) {
     updateRiskDatalist();
 }
 
-// Wybór pojazdu z garażu w Kroku 3
 function populateGarageSelectForPolicy() {
     let sel = document.getElementById('p_garageSelect');
     if(!sel) return;
@@ -1083,7 +1273,6 @@ function fillVehicleFromGarage(vehId) {
     assembleSubjectString();
 }
 
-// Wybór lokalu z listy nieruchomości klienta w Kroku 3
 function populatePropertySelectForPolicy() {
     let sel = document.getElementById('p_propertySelect');
     if(!sel) return;
@@ -1296,11 +1485,15 @@ function renderTempRisks() {
             document.getElementById('p_commValue').value = totalComm.toFixed(2);
         }
     }
+    recalcNetPremiumModal();
     calcInstallmentsOnly();
 }
 
 function calcInstallmentsOnly(existingDates = null) {
-    let premium = parseFloat(document.getElementById('p_premium').value) || 0;
+    let rawPrem = parseFloat(document.getElementById('p_premium').value) || 0;
+    let odpis = parseFloat(document.getElementById('p_odpis').value) || 0;
+    let premium = Math.max(0, rawPrem - odpis);
+
     let installments = parseInt(document.getElementById('p_installments').value) || 1;
     let firstDate = document.getElementById('p_firstPaymentDate').value;
     let container = document.getElementById('p_installmentsContainer');
@@ -1382,7 +1575,6 @@ function savePolicy() {
     let carVin = document.getElementById('p_carVin') ? document.getElementById('p_carVin').value.trim().toUpperCase() : "";
     let subjectStr = "";
 
-    // 1. Jeśli Komunikacja -> Złóż nazwę i automatycznie zapisz auto do Garażu klienta
     if(type === 'Komunikacja') {
         assembleSubjectString();
         subjectStr = document.getElementById('p_homeAddress').value.trim() || "Pojazd";
@@ -1410,9 +1602,7 @@ function savePolicy() {
                 existingCar.vin = carVin;
             }
         }
-    } 
-    // 2. Jeśli Majątek / Firmowe -> Złóż opis i AUTOMATYCZNIE zapisz lokal do Lokali klienta!
-    else {
+    } else {
         let addr = document.getElementById('p_homeAddress').value.trim();
         let propType = document.getElementById('p_propType') ? document.getElementById('p_propType').value : "Mieszkanie";
         let propArea = document.getElementById('p_propArea') ? document.getElementById('p_propArea').value : "";
@@ -1466,16 +1656,21 @@ function savePolicy() {
             let dInput = document.getElementById(`p_instDate_${i}`); 
             let aInput = document.getElementById(`p_instAmt_${i}`); 
             let existingPaid = false;
+            let existingCommTu = 0;
             if(existingPolicy && existingPolicy.installmentDates && existingPolicy.installmentDates[i]) {
                 existingPaid = existingPolicy.installmentDates[i].paid || false; 
+                existingCommTu = existingPolicy.installmentDates[i].commTu || 0;
             }
-            if(dInput && aInput) instDates[i] = { date: dInput.value, amount: aInput.value, paid: existingPaid };
+            if(dInput && aInput) instDates[i] = { date: dInput.value, amount: aInput.value, paid: existingPaid, commTu: existingCommTu };
         }
     }
 
-    let finalPremium = parseFloat(String(document.getElementById('p_premium').value).replace(',', '.')) || 0;
+    let rawPremium = parseFloat(String(document.getElementById('p_premium').value).replace(',', '.')) || 0;
+    let odpisVal = parseFloat(String(document.getElementById('p_odpis').value).replace(',', '.')) || 0;
+    let odpisReasonVal = document.getElementById('p_odpisReasonSelect') ? document.getElementById('p_odpisReasonSelect').value : "";
     let finalComm = parseFloat(String(document.getElementById('p_commValue').value).replace(',', '.')) || 0;
     let commNote = document.getElementById('p_commNote') ? document.getElementById('p_commNote').value.trim() : "";
+    let paymentMethod = document.getElementById('p_paymentMethod') ? document.getElementById('p_paymentMethod').value : "Przelew";
 
     let pData = { 
         id: editingPolicyId || Date.now(), 
@@ -1483,15 +1678,21 @@ function savePolicy() {
         insurer: document.getElementById('p_insurer').value, 
         type: type, 
         salesType: sType, 
+        paymentMethod: paymentMethod,
         number: document.getElementById('p_number').value.trim(), 
         dateStart: document.getElementById('p_dateStart').value, 
         dateEnd: document.getElementById('p_dateEnd').value, 
-        premium: finalPremium, 
+        premium: rawPremium, 
+        odpis: odpisVal,
+        odpisReason: odpisReasonVal,
         installments: instCount, 
         firstPaymentDate: document.getElementById('p_firstPaymentDate').value, 
         installmentDates: instDates, 
         firstPaymentPaid: existingPolicy ? (existingPolicy.firstPaymentPaid || false) : false, 
+        firstPaymentComm: existingPolicy ? (existingPolicy.firstPaymentComm || 0) : 0,
         settlementStatus: existingPolicy ? (existingPolicy.settlementStatus || "nierozliczona") : "nierozliczona",
+        scansSent: existingPolicy ? (existingPolicy.scansSent || false) : false,
+        cashPaidToTu: existingPolicy ? (existingPolicy.cashPaidToTu || false) : false,
         commissionAmt: finalComm, 
         isManualComm: isManualCommission,
         commNote: commNote,
@@ -1504,7 +1705,9 @@ function savePolicy() {
         reqOc: reqOc, 
         acDone: existingPolicy ? (existingPolicy.acDone || false) : false, 
         ocDone: existingPolicy ? (existingPolicy.ocDone || false) : false,
-        renewalStatus: existingPolicy ? (existingPolicy.renewalStatus || "todo") : "todo" 
+        renewalStatus: existingPolicy ? (existingPolicy.renewalStatus || "todo") : "todo",
+        renewalHandled: existingPolicy ? (existingPolicy.renewalHandled || false) : false,
+        renewalArchived: existingPolicy ? (existingPolicy.renewalArchived || false) : false
     };
 
     if(editingPolicyId) { 
@@ -1537,9 +1740,30 @@ function saveDrawerCommissionOverride() {
 
     let toast = document.getElementById('copyToast');
     if(toast) {
-        toast.innerText = `💰 Zaktualizowano prowizję do statystyk: ${formatPLN(p.commissionAmt)}`;
+        toast.innerText = `💰 Zaktualizowano prowizję łączną: ${formatPLN(p.commissionAmt)}`;
         toast.classList.remove('hidden');
         setTimeout(() => toast.classList.add('hidden'), 2200);
+    }
+}
+
+function saveOdpisFromDrawer() {
+    if(!currentOpenPolicyId) return;
+    let p = policiesList.find(x => String(x.id) === String(currentOpenPolicyId));
+    if(!p) return;
+
+    let odpisVal = parseFloat(document.getElementById('pd_odpisInput').value) || 0;
+    let odpisReason = document.getElementById('pd_odpisReason').value;
+
+    p.odpis = odpisVal;
+    p.odpisReason = odpisReason;
+    syncAndRender();
+    populateDrawer('policy', p.id);
+
+    let toast = document.getElementById('copyToast');
+    if(toast) {
+        toast.innerText = `📉 Zapisano odpis / storno: ${formatPLN(odpisVal)}`;
+        toast.classList.remove('hidden');
+        setTimeout(() => toast.classList.add('hidden'), 2000);
     }
 }
 
@@ -1553,18 +1777,22 @@ function updatePolicySettlement(statusVal) {
     }
 }
 
-function getFirstInstallmentAmount(p) {
-    let totalPrem = parseFloat(p.premium) || 0;
-    if(!p.installments || p.installments <= 1) return totalPrem;
-    if(p.installmentDates) {
-        let sumOthers = 0;
-        for(let i = 2; i <= p.installments; i++) {
-            if(p.installmentDates[i]) sumOthers += parseFloat(p.installmentDates[i].amount) || 0;
-        }
-        let firstAmt = totalPrem - sumOthers;
-        if(firstAmt > 0) return firstAmt;
+// Zapis wypłaconej prowizji TU dla konkretnej raty
+function updateRataCommTu(policyId, rataIdx, commVal) {
+    let p = policiesList.find(x => String(x.id) === String(policyId));
+    if(!p) return;
+    let parsed = parseFloat(commVal) || 0;
+
+    if (rataIdx === 1) {
+        p.firstPaymentComm = parsed;
+    } else if (p.installmentDates && p.installmentDates[rataIdx]) {
+        p.installmentDates[rataIdx].commTu = parsed;
     }
-    return totalPrem / p.installments;
+
+    syncAndRender();
+    if(currentOpenPolicyId && String(currentOpenPolicyId) === String(policyId)) {
+        populateDrawer('policy', p.id);
+    }
 }
 
 function populateDrawer(type, id) {
@@ -1574,7 +1802,7 @@ function populateDrawer(type, id) {
         currentOpenPolicyId = p.id; 
         const c = clientsList.find(x => String(x.id) === String(p.clientId));
         
-        document.getElementById('pd_insurer').innerText = p.insurer + (p.salesType === 'renewal' ? " (Wznowienie)" : " (Nowa)"); 
+        document.getElementById('pd_insurer').innerText = p.insurer + (p.salesType === 'renewal' ? " (Wznowienie)" : " (Nowa)") + (p.paymentMethod === 'Gotówka' ? " 💵 [Gotówka]" : ""); 
         document.getElementById('pd_type').innerText = p.type; 
         document.getElementById('pd_number').innerText = "Nr: " + (p.number || "brak");
         
@@ -1585,41 +1813,66 @@ function populateDrawer(type, id) {
         document.getElementById('pd_subject').innerText = p.subject || "-"; 
         document.getElementById('pd_start').innerText = p.dateStart || "-"; 
         document.getElementById('pd_end').innerText = p.dateEnd || "-";
-        document.getElementById('pd_premium').innerText = formatPLN(p.premium) + (p.installments > 1 ? ` (${p.installments} rat)` : ""); 
         
+        // Kwoty przypisu i odpisów
+        let netPrem = getPolicyNetPremium(p);
+        document.getElementById('pd_premiumRaw').innerText = formatPLN(p.premium) + (p.installments > 1 ? ` (${p.installments} rat)` : "");
+        document.getElementById('pd_odpisInput').value = p.odpis ? Number(p.odpis).toFixed(2) : "";
+        document.getElementById('pd_odpisReason').value = p.odpisReason || "";
+        document.getElementById('pd_premiumNet').innerText = formatPLN(netPrem);
+
+        // Prowizja łączna
         document.getElementById('pd_commInput').value = Number(p.commissionAmt || 0).toFixed(2);
-        document.getElementById('pd_commNoteInput').value = p.commNote || "";
-        
+        let commStatusEl = document.getElementById('pd_commManualStatus');
+        if(commStatusEl) commStatusEl.innerText = p.isManualComm ? "(Wpisana ręcznie)" : "(Wyliczona z ryzyk)";
+
+        // Statusy operacyjne z TU
+        let scansCheck = document.getElementById('pd_scansSent');
+        let cashCheck = document.getElementById('pd_cashPaidToTu');
+        if(scansCheck) scansCheck.checked = p.scansSent || false;
+        if(cashCheck) {
+            cashCheck.checked = p.cashPaidToTu || false;
+            cashCheck.parentElement.classList.toggle('hidden', p.paymentMethod !== 'Gotówka');
+        }
+
         let setSelect = document.getElementById('pd_settlementStatus');
         if(setSelect) setSelect.value = p.settlementStatus || "nierozliczona";
 
-        let rList = document.getElementById('pd_risksList'); 
-        rList.innerHTML = ""; 
-        if(p.risks && p.risks.length > 0) { 
-            p.risks.forEach(r => { 
-                rList.innerHTML += `<div class="flex justify-between border-b border-gray-200 pb-1"><span>${r.name}</span> <span class="font-bold text-goldAccent">${formatPLN(r.premium)} (${r.pct}%)</span></div>`; 
-            }); 
-        } else { 
-            rList.innerHTML = "<p class='text-xs text-textMuted'>Brak rozbicia na ryzyka (wpisano kwotę łączną).</p>"; 
-        }
-        
+        // Harmonogram rat i prowizji TU
         let instBox = document.getElementById('pd_installmentsBox'); 
         let instList = document.getElementById('pd_installmentsList'); 
         instList.innerHTML = '';
+
         if (p.installments > 1 || p.firstPaymentDate) {
             instBox.classList.remove('hidden'); 
+            let cb = getPolicyCommissionBreakdown(p);
+            let balanceBadge = document.getElementById('pd_commBalanceBadge');
+            if(balanceBadge) {
+                balanceBadge.innerText = `Odebrano: ${formatPLN(cb.paid)} / ${formatPLN(cb.total)}`;
+            }
+
             let firstAmt = getFirstInstallmentAmount(p);
             let isCanceled = (p.settlementStatus === 'anulowana');
-            let firstStatusLabel = (!p.firstPaymentPaid && isCanceled) ? `<span class="text-[10px] text-red-600 font-bold ml-1">(Anulowana - sprzedaż)</span>` : '';
+            let firstStatusLabel = (!p.firstPaymentPaid && isCanceled) ? `<span class="text-[10px] text-red-600 font-bold ml-1">(Storno)</span>` : '';
 
             instList.innerHTML += `
-                <div class="flex justify-between items-center border-b border-amber-200/60 pb-1 mt-1">
-                    <div class="flex items-center">
-                        <input type="checkbox" ${p.firstPaymentPaid ? 'checked' : ''} onchange="toggleInstPaid('${p.id}', 1)" class="w-4 h-4 accent-green-600 cursor-pointer">
-                        <span class="text-textDark font-semibold ml-2">${p.installments > 1 ? 'Rata I:' : 'Całość:'} ${firstStatusLabel}</span>
+                <div class="bg-white p-2.5 rounded-lg border border-amber-200/80 space-y-1.5">
+                    <div class="flex justify-between items-center">
+                        <label class="flex items-center cursor-pointer">
+                            <input type="checkbox" ${p.firstPaymentPaid ? 'checked' : ''} onchange="toggleInstPaid('${p.id}', 1)" class="w-4 h-4 accent-green-600">
+                            <span class="text-xs font-bold text-textDark ml-2">${p.installments > 1 ? 'Rata I:' : 'Płatność:'} ${firstStatusLabel}</span>
+                        </label>
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs font-extrabold ${p.firstPaymentPaid ? 'text-green-600' : 'text-textDark'}">${formatPLN(firstAmt)}</span>
+                            <button onclick="sendPaymentReminderSms('${p.id}', 1)" class="text-[11px] bg-blue-50 text-blue-700 hover:bg-blue-100 px-1.5 py-0.5 rounded font-bold" title="Kopiuj SMS z przypomnieniem">💬 SMS</button>
+                        </div>
                     </div>
-                    <div class="text-right">
-                        <span class="block font-bold ${p.firstPaymentPaid ? 'text-green-600' : (isCanceled ? 'line-through text-gray-400' : 'text-textDark')}">${p.firstPaymentDate || "-"} <span class="text-xs font-normal text-textMuted">(${formatPLN(firstAmt)})</span></span>
+                    <div class="flex justify-between items-center text-[11px] pt-1 border-t border-gray-100">
+                        <span class="text-textMuted">Termin: <b>${p.firstPaymentDate || p.dateStart || '-'}</b></span>
+                        <div class="flex items-center gap-1">
+                            <span class="text-[10px] text-green-800 font-semibold">Prowizja TU:</span>
+                            <input type="number" step="0.01" value="${p.firstPaymentComm !== undefined ? p.firstPaymentComm : ''}" placeholder="${(cb.total / (p.installments || 1)).toFixed(2)}" onchange="updateRataCommTu('${p.id}', 1, this.value)" class="w-20 border rounded p-1 text-right text-xs font-bold text-green-700">
+                        </div>
                     </div>
                 </div>`;
             
@@ -1627,15 +1880,25 @@ function populateDrawer(type, id) {
                 for(let i=2; i<=p.installments; i++) { 
                     let dInfo = p.installmentDates[i]; 
                     if(dInfo) {
-                        let statusLbl = (!dInfo.paid && isCanceled) ? `<span class="text-[10px] text-red-600 font-bold ml-1">(Wygasła po sprzedaży)</span>` : '';
+                        let statusLbl = (!dInfo.paid && isCanceled) ? `<span class="text-[10px] text-red-600 font-bold ml-1">(Wygasła)</span>` : '';
                         instList.innerHTML += `
-                            <div class="flex justify-between items-center border-b border-amber-200/60 pb-1 mt-2">
-                                <div class="flex items-center">
-                                    <input type="checkbox" ${dInfo.paid ? 'checked' : ''} onchange="toggleInstPaid('${p.id}', ${i})" class="w-4 h-4 accent-green-600 cursor-pointer">
-                                    <span class="text-textDark font-semibold ml-2">Rata ${i}: ${statusLbl}</span>
+                            <div class="bg-white p-2.5 rounded-lg border border-amber-200/80 space-y-1.5">
+                                <div class="flex justify-between items-center">
+                                    <label class="flex items-center cursor-pointer">
+                                        <input type="checkbox" ${dInfo.paid ? 'checked' : ''} onchange="toggleInstPaid('${p.id}', ${i})" class="w-4 h-4 accent-green-600">
+                                        <span class="text-xs font-bold text-textDark ml-2">Rata ${i}: ${statusLbl}</span>
+                                    </label>
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-xs font-extrabold ${dInfo.paid ? 'text-green-600' : 'text-textDark'}">${formatPLN(dInfo.amount)}</span>
+                                        <button onclick="sendPaymentReminderSms('${p.id}', ${i})" class="text-[11px] bg-blue-50 text-blue-700 hover:bg-blue-100 px-1.5 py-0.5 rounded font-bold" title="Kopiuj SMS z przypomnieniem">💬 SMS</button>
+                                    </div>
                                 </div>
-                                <div class="text-right">
-                                    <span class="block font-bold ${dInfo.paid ? 'text-green-600' : (isCanceled ? 'line-through text-gray-400' : 'text-textDark')}">${dInfo.date || "-"} <span class="text-xs font-normal text-textMuted">(${formatPLN(dInfo.amount)})</span></span>
+                                <div class="flex justify-between items-center text-[11px] pt-1 border-t border-gray-100">
+                                    <span class="text-textMuted">Termin: <b>${dInfo.date || '-'}</b></span>
+                                    <div class="flex items-center gap-1">
+                                        <span class="text-[10px] text-green-800 font-semibold">Prowizja TU:</span>
+                                        <input type="number" step="0.01" value="${dInfo.commTu !== undefined ? dInfo.commTu : ''}" placeholder="${(cb.total / p.installments).toFixed(2)}" onchange="updateRataCommTu('${p.id}', ${i}, this.value)" class="w-20 border rounded p-1 text-right text-xs font-bold text-green-700">
+                                    </div>
                                 </div>
                             </div>`; 
                     }
@@ -1710,7 +1973,7 @@ function clonePolicyToRenewal() {
     renderTempRisks();
 }
 
-// ================= 8. OFERTY I AI =================
+// ================= 9. OFERTY I AI =================
 function renderOffersList() {
     const tbody = document.getElementById('offersTableBody'); 
     if(!tbody) return; 
@@ -1916,7 +2179,7 @@ function generatePDF() {
     });
 }
 
-// ================= 9. DASHBOARD, FINANSE I EKSPORT CSV =================
+// ================= 10. DASHBOARD, ROZLICZENIA Z TU, PORTFEL GOTÓWKOWY =================
 function updateKanbanStatus(policyId, status) { 
     let p = policiesList.find(x => String(x.id) === String(policyId)); 
     if(p) { 
@@ -1929,9 +2192,12 @@ function renderDashboard() {
     let today = new Date(); 
     today.setHours(0,0,0,0); 
     let currentMonth = today.getMonth() + 1;
-    let overdueHtml = '', upcomingHtml = '', thirtyDaysHtml = '', birthdaysHtml = '', kbTodo = '', kbOffer = '', kbWon = '', kbLost = '';
-    let monthPrem = 0, monthComm = 0, countPolicies = 0;
+    let overdueHtml = '', upcomingHtml = '', thirtyDaysHtml = '', birthdaysHtml = '', tuSettleHtml = '';
+    let kbTodo = '', kbOffer = '', kbWon = '', kbLost = '';
+    let monthPremNet = 0, monthComm = 0, countPolicies = 0, cashInHand = 0, thirtyDaysCount = 0, tuSettleCount = 0;
     
+    let showArchivedKb = document.getElementById('kb_showArchived') ? document.getElementById('kb_showArchived').checked : false;
+
     clientsList.forEach(c => { 
         if(c.birth) { 
             let bDate = new Date(c.birth); 
@@ -1959,7 +2225,7 @@ function renderDashboard() {
             if(diffDays >= 0 && diffDays <= 45) {
                 let c = clientsList.find(x => String(x.id) === String(ep.clientId));
                 if(c) {
-                    thirtyDaysHtml += `<div class="flex justify-between items-center bg-green-50 p-3 rounded-xl border border-green-200"><div><span class="font-bold cursor-pointer hover:underline text-green-900" onclick="openClientFull('${c.id}')">${c.name}</span> <span class="text-xs text-green-700 font-bold">(OBCA: ${ep.subject})</span></div><div class="text-right"><span class="text-xs font-bold text-green-700">Przejęcie za ${diffDays} dni!</span></div></div>`;
+                    thirtyDaysHtml += `<div class="flex justify-between items-center bg-green-50 p-2.5 rounded-xl border border-green-200"><div><span class="font-bold cursor-pointer hover:underline text-green-900" onclick="openClientFull('${c.id}')">${c.name}</span> <span class="text-xs text-green-700 font-bold">(OBCA: ${ep.subject})</span></div><div class="text-right"><span class="text-xs font-bold text-green-700">Przejęcie za ${diffDays} dni!</span></div></div>`;
                 }
             }
         }
@@ -1969,44 +2235,111 @@ function renderDashboard() {
         let c = clientsList.find(x => String(x.id) === String(p.clientId)); 
         if(!c) return;
         let isCanceled = (p.settlementStatus === 'anulowana');
+        let netPrem = getPolicyNetPremium(p);
+
+        // Kasa w ręku: płatność gotówką, klient zapłacił, ale agent jeszcze nie rozliczył/przelał do TU
+        if (p.paymentMethod === 'Gotówka' && p.firstPaymentPaid && !p.cashPaidToTu) {
+            cashInHand += getFirstInstallmentAmount(p);
+        }
+
+        // Zadania rozliczenia operacyjnego z TU (Skany / Gotówka)
+        let needsTuAction = false;
+        let tuReasons = [];
+        if (!p.scansSent) { needsTuAction = true; tuReasons.push("📄 Skany do wysłania"); }
+        if (p.paymentMethod === 'Gotówka' && p.firstPaymentPaid && !p.cashPaidToTu) {
+            needsTuAction = true;
+            tuReasons.push(`💵 Gotówka: ${formatPLN(getFirstInstallmentAmount(p))}`);
+        }
+        if (needsTuAction && !isCanceled) {
+            tuSettleCount++;
+            tuSettleHtml += `
+                <div class="p-2.5 bg-white rounded-xl border border-purple-200 flex justify-between items-center text-xs">
+                    <div>
+                        <span class="font-bold text-purple-900 cursor-pointer hover:underline" onclick="openDrawer('policy', '${p.id}')">${p.insurer} (${p.subject || 'Polisa'})</span>
+                        <p class="text-[11px] text-textMuted">${c.name} | <span class="font-bold text-purple-700">${tuReasons.join(' | ')}</span></p>
+                    </div>
+                    <div class="flex gap-1">
+                        ${!p.scansSent ? `<button onclick="toggleTuAction('scans', '${p.id}')" class="text-[10px] bg-purple-50 text-purple-700 border border-purple-300 hover:bg-purple-100 px-2 py-1 rounded font-bold">Skany ✓</button>` : ''}
+                        ${(p.paymentMethod === 'Gotówka' && !p.cashPaidToTu) ? `<button onclick="toggleTuAction('cash', '${p.id}')" class="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-300 hover:bg-emerald-100 px-2 py-1 rounded font-bold">Wpłacone ✓</button>` : ''}
+                    </div>
+                </div>`;
+        }
 
         if(p.dateStart && new Date(p.dateStart).getMonth() + 1 === currentMonth && new Date(p.dateStart).getFullYear() === today.getFullYear()) { 
             if(!isCanceled) {
-                monthPrem += parseFloat(p.premium) || 0; 
+                monthPremNet += netPrem; 
                 monthComm += parseFloat(p.commissionAmt) || 0; 
                 countPolicies++; 
             } else if(p.firstPaymentPaid) {
                 let numInst = p.installments || 1;
-                monthPrem += getFirstInstallmentAmount(p);
+                monthPremNet += getFirstInstallmentAmount(p);
                 monthComm += (parseFloat(p.commissionAmt) || 0) / numInst;
                 countPolicies++;
             }
         }
         
         if(p.reqAc && !p.acDone && !isCanceled) { 
-            overdueHtml += `<div class="flex justify-between items-center bg-red-50 p-2 rounded-lg border border-red-200"><div><span class="font-bold text-red-800 cursor-pointer hover:underline" onclick="openDrawer('policy', '${p.id}')">${c.name}</span><p class="text-xs text-red-600 font-bold">📸 Brak zdjęć do AC (${p.subject})!</p></div></div>`; 
+            overdueHtml += `<div class="flex justify-between items-center bg-red-50 p-2 rounded-lg border border-red-200"><div><span class="font-bold text-red-800 cursor-pointer hover:underline" onclick="openDrawer('policy', '${p.id}')">${c.name}</span><p class="text-xs text-red-600 font-bold">📸 Brak zdjęć do AC (${p.subject || ''})!</p></div></div>`; 
         }
         if(p.reqOc && !p.ocDone && !isCanceled) { 
             overdueHtml += `<div class="flex justify-between items-center bg-red-50 p-2 rounded-lg border border-red-200"><div><span class="font-bold text-red-800 cursor-pointer hover:underline" onclick="openDrawer('policy', '${p.id}')">${c.name}</span><p class="text-xs text-red-600 font-bold">✉️ Nie wysłano wypowiedzenia OC!</p></div></div>`; 
         }
 
-        if(p.dateEnd && !isCanceled) {
+        // Kończące się polisy w 30 dniach - POKAZUJ TYLKO NIEZAŁATWIONE!
+        if(p.dateEnd && !isCanceled && !p.renewalHandled) {
             let dEnd = new Date(p.dateEnd); 
             let diffDays = Math.ceil((dEnd - today) / (1000 * 60 * 60 * 24));
             if(diffDays >= 0 && diffDays <= 30) { 
-                thirtyDaysHtml += `<div class="flex justify-between items-center bg-luxBg p-3 rounded-xl border border-luxBorder"><div><span class="font-bold cursor-pointer hover:underline" onclick="openClientFull('${c.id}')">${c.name}</span> <span class="text-xs text-textMuted">(${p.insurer} - ${p.subject || ''})</span></div><div class="text-right"><span class="text-xs font-bold text-amber-600 bg-amber-100 px-2 py-0.5 rounded">Za ${diffDays} dni (${p.dateEnd})</span></div></div>`; 
+                thirtyDaysCount++;
+                thirtyDaysHtml += `
+                    <div class="flex justify-between items-center bg-luxBg p-2.5 rounded-xl border border-luxBorder">
+                        <div>
+                            <span class="font-bold cursor-pointer hover:underline text-textDark" onclick="openClientFull('${c.id}')">${c.name}</span> 
+                            <span class="text-xs text-textMuted">(${p.insurer} - ${p.subject || ''})</span>
+                            <span class="block text-[11px] text-amber-700 font-bold">Koniec za ${diffDays} dni (${p.dateEnd})</span>
+                        </div>
+                        <div class="flex gap-1.5">
+                            <button onclick="sendPaymentReminderSms('${p.id}', 1)" class="text-xs bg-blue-50 text-blue-700 hover:bg-blue-100 px-2 py-1 rounded font-bold" title="Kopiuj SMS ze wznowieniem">💬 SMS</button>
+                            <button onclick="markRenewalAsHandled('${p.id}')" class="text-xs bg-green-600 hover:bg-green-700 text-white px-2.5 py-1 rounded font-bold shadow-sm">Załatwione ✓</button>
+                        </div>
+                    </div>`; 
             }
-            if(diffDays >= 0 && diffDays <= 45) { 
-                let bColor = diffDays < 10 ? 'text-red-600' : 'text-amber-600'; 
-                let actions = '';
-                if(p.renewalStatus === 'todo' || !p.renewalStatus) actions = `<button onclick="updateKanbanStatus('${p.id}', 'offer')" class="text-[10px] bg-blue-100 text-blue-800 px-2 py-1 rounded font-bold">Wyślij ofertę ➔</button>`;
-                if(p.renewalStatus === 'offer') actions = `<button onclick="updateKanbanStatus('${p.id}', 'won')" class="text-[10px] bg-green-100 text-green-800 px-2 py-1 rounded mr-1 font-bold">✅ Sukces</button> <button onclick="updateKanbanStatus('${p.id}', 'lost')" class="text-[10px] bg-red-100 text-red-800 px-2 py-1 rounded font-bold">❌ Porażka</button>`;
-                let card = `<div class="bg-white p-3 rounded-lg shadow-sm border border-luxBorder relative group"><p class="font-bold text-sm text-textDark cursor-pointer hover:text-goldAccent" onclick="openClientFull('${c.id}')">${c.name}</p><p class="text-xs text-textMuted">${p.insurer} | ${p.subject || ''}</p><div class="flex justify-between items-center mt-2"><span class="text-[10px] font-bold ${bColor}">Koniec: ${p.dateEnd}</span></div><div class="mt-3 flex justify-end border-t pt-2">${actions}</div></div>`;
-                let s = p.renewalStatus || 'todo'; 
-                if(s === 'todo') kbTodo += card; 
-                if(s === 'offer') kbOffer += card; 
-                if(s === 'won') kbWon += card; 
-                if(s === 'lost') kbLost += card; 
+        }
+
+        // KANBAN ODNOWIEŃ (<45 DNI) Z OPCJĄ ARCHIWIZACJI
+        if(p.dateEnd && !isCanceled) {
+            let dEnd = new Date(p.dateEnd); 
+            let diffDays = Math.ceil((dEnd - today) / (1000 * 60 * 60 * 24));
+            if(diffDays >= 0 && diffDays <= 45) {
+                if(!p.renewalArchived || showArchivedKb) {
+                    let bColor = diffDays < 10 ? 'text-red-600' : 'text-amber-600'; 
+                    let actions = '';
+                    if(p.renewalStatus === 'todo' || !p.renewalStatus) {
+                        actions = `<button onclick="updateKanbanStatus('${p.id}', 'offer')" class="text-[10px] bg-blue-100 text-blue-800 px-2 py-1 rounded font-bold">Oferta ➔</button>`;
+                    } else if(p.renewalStatus === 'offer') {
+                        actions = `<button onclick="updateKanbanStatus('${p.id}', 'won')" class="text-[10px] bg-green-100 text-green-800 px-2 py-1 rounded mr-1 font-bold">✅ Sukces</button><button onclick="updateKanbanStatus('${p.id}', 'lost')" class="text-[10px] bg-red-100 text-red-800 px-2 py-1 rounded font-bold">❌ Utracone</button>`;
+                    } else if(p.renewalStatus === 'won' || p.renewalStatus === 'lost') {
+                        actions = p.renewalArchived 
+                            ? `<button onclick="unarchiveKanbanCard('${p.id}')" class="text-[10px] bg-gray-200 text-gray-700 px-2 py-0.5 rounded font-bold">Przywróć</button>` 
+                            : `<button onclick="archiveKanbanCard('${p.id}')" class="text-[10px] bg-gray-100 hover:bg-gray-200 text-gray-600 px-2 py-0.5 rounded font-bold">Ukryj / Zamknij</button>`;
+                    }
+
+                    let card = `
+                        <div class="bg-white p-3 rounded-lg shadow-sm border border-luxBorder relative ${p.renewalArchived ? 'opacity-50' : ''}">
+                            <p class="font-bold text-sm text-textDark cursor-pointer hover:text-goldAccent" onclick="openClientFull('${c.id}')">${c.name}</p>
+                            <p class="text-xs text-textMuted">${p.insurer} | ${p.subject || ''}</p>
+                            <div class="flex justify-between items-center mt-2">
+                                <span class="text-[10px] font-bold ${bColor}">Koniec: ${p.dateEnd}</span>
+                            </div>
+                            <div class="mt-2.5 flex justify-end border-t pt-2 gap-1">${actions}</div>
+                        </div>`;
+
+                    let s = p.renewalStatus || 'todo'; 
+                    if(s === 'todo') kbTodo += card; 
+                    if(s === 'offer') kbOffer += card; 
+                    if(s === 'won') kbWon += card; 
+                    if(s === 'lost') kbLost += card; 
+                }
             }
         }
 
@@ -2030,17 +2363,28 @@ function renderDashboard() {
                         if(dInst < today) makeOverdueRow(`Rata ${i}`, inst.date, inst.amount); 
                         else if(dInst >= today && dInst <= next7Days) makeUpcomingRow(`Rata ${i}`, inst.date, inst.amount); 
                     } 
-                }
+                } 
             }
         }
     });
 
     document.getElementById('dash_countPolicies').innerText = countPolicies; 
-    document.getElementById('dash_monthPrem').innerText = formatPLN(monthPrem); 
+    document.getElementById('dash_monthPrem').innerText = formatPLN(monthPremNet); 
     document.getElementById('dash_monthComm').innerText = formatPLN(monthComm);
-    document.getElementById('dash_thirtyDays').innerHTML = thirtyDaysHtml || '<p class="text-sm text-textMuted">Brak polis wygasających w 30 dniach.</p>';
+    let cashEl = document.getElementById('dash_cashInHand');
+    if(cashEl) cashEl.innerText = formatPLN(cashInHand);
+
+    let tuCountEl = document.getElementById('dash_tuSettleCount');
+    if(tuCountEl) tuCountEl.innerText = `${tuSettleCount} do zrobienia`;
+    let tuBox = document.getElementById('dash_tuSettlementList');
+    if(tuBox) tuBox.innerHTML = tuSettleHtml || '<p class="text-xs text-purple-700/60 italic py-2">Wszystkie skany i gotówka rozliczone z TU!</p>';
+
+    let tdCountEl = document.getElementById('dash_thirtyDaysCount');
+    if(tdCountEl) tdCountEl.innerText = `${thirtyDaysCount} spraw`;
+    document.getElementById('dash_thirtyDays').innerHTML = thirtyDaysHtml || '<p class="text-sm text-textMuted py-2">Brak spraw wymagających kontaktu.</p>';
+
     document.getElementById('dash_birthdays').innerHTML = birthdaysHtml || '<p class="text-sm text-textMuted">Brak urodzin/przeglądów.</p>';
-    document.getElementById('dash_overdue').innerHTML = overdueHtml || '<p class="text-sm text-textMuted text-green-700 font-semibold">Brak zaległych zadań i płatności.</p>';
+    document.getElementById('dash_overdue').innerHTML = overdueHtml || '<p class="text-sm text-green-700 font-semibold">Brak zaległych zadań i płatności.</p>';
     document.getElementById('dash_upcoming').innerHTML = upcomingHtml || '<p class="text-sm text-textMuted">Brak rat w najbliższym tygodniu.</p>';
     
     if(document.getElementById('k_todo')) { 
@@ -2051,11 +2395,12 @@ function renderDashboard() {
     }
     
     let g = monthlyGoalAmount || 10000;
-    document.getElementById('dash_goalText').innerText = `${formatPLN(monthPrem)} / ${formatPLN(g)}`;
-    let pct = Math.min((monthPrem / g) * 100, 100); 
+    document.getElementById('dash_goalText').innerText = `${formatPLN(monthPremNet)} / ${formatPLN(g)}`;
+    let pct = Math.min((monthPremNet / g) * 100, 100); 
     document.getElementById('dash_goalBar').style.width = pct + '%';
 }
 
+// ================= 11. FINANSE, YOY I EKSPORT CSV =================
 function renderFinances() {
     let yearsMap = {}; 
     let paidComm = 0, pendingComm = 0, premiumPaid = 0, premiumPending = 0; 
@@ -2072,23 +2417,27 @@ function renderFinances() {
 
         let y = p.dateStart ? new Date(p.dateStart).getFullYear() : null; 
         if(y && !isNaN(y)) { 
-            if(!yearsMap[y]) yearsMap[y] = { premium: 0, commTotal: 0, commPaid: 0, commPending: 0 }; 
+            if(!yearsMap[y]) yearsMap[y] = { premiumNet: 0, odpis: 0, commTotal: 0, commPaid: 0, commPending: 0 }; 
+            yearsMap[y].odpis += parseFloat(p.odpis) || 0;
         }
 
         let c = clientsList.find(x => String(x.id) === String(p.clientId)); 
         let totalComm = parseFloat(p.commissionAmt) || 0; 
         let numInst = p.installments || 1; 
-        let partComm = totalComm / numInst;
         
-        let processInstallment = (rataLabel, dateStr, amountStr, isPaid) => {
+        let processInstallment = (rataLabel, dateStr, amountStr, isPaid, rataCommVal) => {
             if(isCanceled && !isPaid) return;
 
             let cAmt = parseFloat(amountStr) || 0;
+            let thisComm = (rataCommVal !== undefined && rataCommVal !== null && rataCommVal !== "") 
+                ? parseFloat(rataCommVal) 
+                : (totalComm / numInst);
+
             if(y && yearsMap[y]) {
-                yearsMap[y].premium += cAmt;
-                yearsMap[y].commTotal += partComm;
-                if(isPaid) yearsMap[y].commPaid += partComm; 
-                else yearsMap[y].commPending += partComm; 
+                yearsMap[y].premiumNet += cAmt;
+                yearsMap[y].commTotal += thisComm;
+                if(isPaid) yearsMap[y].commPaid += thisComm; 
+                else yearsMap[y].commPending += thisComm; 
             }
 
             if(statusFilter !== 'all' && pStatus !== statusFilter) return;
@@ -2100,15 +2449,15 @@ function renderFinances() {
 
             if(isPaid) { 
                 premiumPaid += cAmt; 
-                paidComm += partComm; 
+                paidComm += thisComm; 
             } else { 
                 premiumPending += cAmt; 
-                pendingComm += partComm; 
+                pendingComm += thisComm; 
             }
 
             let statusBadge = pStatus === 'rozliczona' 
                 ? `<span class="text-[10px] bg-green-100 text-green-800 px-2 py-0.5 rounded font-bold">✅ Rozliczona z TU</span>` 
-                : (pStatus === 'anulowana' ? `<span class="text-[10px] bg-red-100 text-red-800 px-2 py-0.5 rounded font-bold">❌ Wypowiedziana</span>` : `<span class="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-bold">⏳ Nierozliczona z TU</span>`);
+                : (pStatus === 'anulowana' ? `<span class="text-[10px] bg-red-100 text-red-800 px-2 py-0.5 rounded font-bold">❌ Storno</span>` : `<span class="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-bold">⏳ Nierozliczona</span>`);
             
             let paidBadge = isPaid 
                 ? `<span class="text-[10px] text-green-700 font-bold block">Opłacona przez klienta</span>` 
@@ -2119,19 +2468,19 @@ function renderFinances() {
                     <td class="p-4"><span class="font-bold text-textDark">${p.insurer}</span><br><span class="text-xs font-mono text-textMuted">${p.number || '-'}</span></td>
                     <td class="p-4 font-semibold text-goldAccent hover:underline" onclick="event.stopPropagation(); openClientFull('${p.clientId}')">${c ? c.name : "Nieznany"}</td>
                     <td class="p-4 text-xs font-bold text-textDark">${rataLabel}: ${dateStr || p.dateStart || '-'} ${paidBadge}</td>
-                    <td class="p-4">${statusBadge} ${p.commNote ? `<span class="block text-[11px] text-textMuted italic mt-1">💬 ${p.commNote}</span>` : ''}</td>
+                    <td class="p-4">${statusBadge} ${p.paymentMethod === 'Gotówka' ? '<span class="text-[10px] bg-emerald-100 text-emerald-800 px-1 rounded ml-1 font-bold">Gotówka</span>' : ''}</td>
                     <td class="p-4 text-right font-bold ${isPaid ? 'text-blue-600' : 'text-red-600'}">${formatPLN(cAmt)}</td>
-                    <td class="p-4 text-right font-extrabold ${isPaid ? 'text-green-600' : 'text-amber-600'}">${formatPLN(partComm)}</td>
+                    <td class="p-4 text-right font-extrabold ${isPaid ? 'text-green-600' : 'text-amber-600'}">${formatPLN(thisComm)}</td>
                 </tr>`;
         };
 
         let firstAmt = getFirstInstallmentAmount(p);
-        processInstallment(p.installments > 1 ? "I rata" : "Jednorazowo", p.firstPaymentDate || p.dateStart, firstAmt, p.firstPaymentPaid);
+        processInstallment(p.installments > 1 ? "I rata" : "Jednorazowo", p.firstPaymentDate || p.dateStart, firstAmt, p.firstPaymentPaid, p.firstPaymentComm);
 
         if (p.installments > 1 && p.installmentDates) { 
             for(let i = 2; i <= p.installments; i++) { 
                 let inst = p.installmentDates[i]; 
-                if(inst) processInstallment(`Rata ${i}`, inst.date, inst.amount, inst.paid); 
+                if(inst) processInstallment(`Rata ${i}`, inst.date, inst.amount, inst.paid, inst.commTu); 
             } 
         }
     });
@@ -2141,7 +2490,15 @@ function renderFinances() {
         tbody.innerHTML = '';
         Object.keys(yearsMap).sort((a,b) => b - a).forEach(y => { 
             let d = yearsMap[y]; 
-            tbody.innerHTML += `<tr class="hover:bg-luxBg/60 transition-all border-l-4 border-transparent hover:border-goldAccent"><td class="p-4 font-bold text-textDark text-lg">${y}</td><td class="p-4 text-right font-bold text-indigo-600">${formatPLN(d.premium)}</td><td class="p-4 text-right font-bold text-blue-600">${formatPLN(d.commTotal)}</td><td class="p-4 text-right font-bold text-green-600">${formatPLN(d.commPaid)}</td><td class="p-4 text-right font-bold text-amber-600">${formatPLN(d.commPending)}</td></tr>`; 
+            tbody.innerHTML += `
+                <tr class="hover:bg-luxBg/60 transition-all border-l-4 border-transparent hover:border-goldAccent">
+                    <td class="p-4 font-bold text-textDark text-lg">${y}</td>
+                    <td class="p-4 text-right font-bold text-indigo-600">${formatPLN(d.premiumNet)}</td>
+                    <td class="p-4 text-right font-bold text-red-600">-${formatPLN(d.odpis)}</td>
+                    <td class="p-4 text-right font-bold text-blue-600">${formatPLN(d.commTotal)}</td>
+                    <td class="p-4 text-right font-bold text-green-600">${formatPLN(d.commPaid)}</td>
+                    <td class="p-4 text-right font-bold text-amber-600">${formatPLN(d.commPending)}</td>
+                </tr>`; 
         });
     }
 
@@ -2164,7 +2521,7 @@ function exportFinancesCSV() {
     let fYear = filterVal ? parseInt(filterVal.split('-')[0]) : null; 
     let fMonth = filterVal ? parseInt(filterVal.split('-')[1]) : null;
 
-    let csvRows = ["TU;Numer Polisy;Klient;PESEL/NIP;Przedmiot;Data Poczatku;Rata;Termin Płatnosci;Opłacona przez klienta;Status Rozliczenia TU;Składka (PLN);Prowizja (PLN);Notatka do prowizji"];
+    let csvRows = ["TU;Numer Polisy;Klient;PESEL/NIP;Przedmiot;Forma Platnosci;Data Poczatku;Rata;Termin Platnosci;Oplacona przez klienta;Status Rozliczenia TU;Skladka Netto (PLN);Odpis (PLN);Wyplacona Prowizja TU (PLN);Notatka"];
 
     policiesList.forEach(p => {
         let isCanceled = (p.settlementStatus === 'anulowana');
@@ -2178,23 +2535,25 @@ function exportFinancesCSV() {
         let note = (p.commNote || "").replace(/;/g, ',');
         let totalComm = parseFloat(p.commissionAmt) || 0;
         let numInst = p.installments || 1;
-        let partComm = (totalComm / numInst).toFixed(2).replace('.', ',');
 
-        let addCsvLine = (rataName, dateStr, amt, isPaid) => {
+        let addCsvLine = (rataName, dateStr, amt, isPaid, commVal) => {
             if(isCanceled && !isPaid) return;
             let d = dateStr ? new Date(dateStr) : (p.dateStart ? new Date(p.dateStart) : null);
             if(fYear && fMonth && d && !isNaN(d.getTime())) {
                 if(d.getFullYear() !== fYear || (d.getMonth() + 1) !== fMonth) return;
             }
             let cleanAmt = Number(amt || 0).toFixed(2).replace('.', ',');
-            csvRows.push(`${p.insurer};"${p.number || ''}";"${cName}";"${cId}";"${subj}";${p.dateStart || ''};${rataName};${dateStr || ''};${isPaid ? 'TAK' : 'NIE'};${pStatus};${cleanAmt};${partComm};"${note}"`);
+            let cleanOdpis = Number(p.odpis || 0).toFixed(2).replace('.', ',');
+            let cleanComm = Number(commVal !== undefined ? commVal : (totalComm / numInst)).toFixed(2).replace('.', ',');
+
+            csvRows.push(`${p.insurer};"${p.number || ''}";"${cName}";"${cId}";"${subj}";${p.paymentMethod || 'Przelew'};${p.dateStart || ''};${rataName};${dateStr || ''};${isPaid ? 'TAK' : 'NIE'};${pStatus};${cleanAmt};${cleanOdpis};${cleanComm};"${note}"`);
         };
 
-        addCsvLine(numInst > 1 ? "Rata 1" : "Calosc", p.firstPaymentDate || p.dateStart, getFirstInstallmentAmount(p), p.firstPaymentPaid);
+        addCsvLine(numInst > 1 ? "Rata 1" : "Calosc", p.firstPaymentDate || p.dateStart, getFirstInstallmentAmount(p), p.firstPaymentPaid, p.firstPaymentComm);
         if(numInst > 1 && p.installmentDates) {
             for(let i = 2; i <= numInst; i++) {
                 let inst = p.installmentDates[i];
-                if(inst) addCsvLine(`Rata ${i}`, inst.date, inst.amount, inst.paid);
+                if(inst) addCsvLine(`Rata ${i}`, inst.date, inst.amount, inst.paid, inst.commTu);
             }
         }
     });
@@ -2204,14 +2563,14 @@ function exportFinancesCSV() {
     let url = URL.createObjectURL(blob);
     let a = document.createElement("a");
     a.href = url;
-    a.download = `Raport_Prowizji_${filterVal || 'Wszystkie'}.csv`;
+    a.download = `Raport_Finansowy_${filterVal || 'Wszystkie'}.csv`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
 }
 
-// ================= 10. KALENDARZ Z INTERAKTYWNYM WIDOKIEM DZIENNYM =================
+// ================= 12. KALENDARZ =================
 function renderCalendar() {
     const grid = document.getElementById('calendarGrid'); 
     const evList = document.getElementById('calendarEventsList'); 
@@ -2252,10 +2611,10 @@ function renderCalendar() {
         let c = clientsList.find(x => String(x.id) === String(p.clientId));
         let cName = c ? c.name : 'Polisa';
 
-        if(p.dateEnd) {
+        if(p.dateEnd && !p.renewalHandled) {
             let eD = new Date(p.dateEnd);
             if(eD.getMonth() === month && eD.getFullYear() === year) {
-                eventsInMonth.push({ day: eD.getDate(), type: '🛡️', text: `${cName} - Koniec polisy ${p.insurer} (${p.subject})`, action: () => openDrawer('policy', p.id) });
+                eventsInMonth.push({ day: eD.getDate(), type: '🛡️', text: `${cName} - Koniec polisy ${p.insurer} (${p.subject || ''})`, action: () => openDrawer('policy', p.id) });
             }
         }
         if(p.firstPaymentDate && !p.firstPaymentPaid) {
@@ -2306,7 +2665,7 @@ function renderCalendar() {
         
         evList.innerHTML = `<button onclick="selectedCalendarDay=null; renderCalendar();" class="w-full text-xs bg-gray-200 hover:bg-gray-300 px-3 py-1.5 rounded-lg font-bold mb-2">⬅ Pokaż cały miesiąc</button>`;
         if(dayEvents.length > 0) {
-            dayEvents.forEach((e, idx) => {
+            dayEvents.forEach((e) => {
                 let div = document.createElement('div');
                 div.className = "p-3 bg-luxBg rounded-xl border border-luxBorder text-sm cursor-pointer hover:border-goldAccent transition-all";
                 div.innerHTML = `<b>${e.type}</b> ${e.text}`;
@@ -2352,7 +2711,7 @@ function addCalendarEvent(type) {
     }
 }
 
-// ================= 11. USTAWIENIA I SŁOWNIKI =================
+// ================= 13. SŁOWNIKI I ADMINISTRACJA =================
 function renderInsurersLibrary() {
     let listBody = document.getElementById('insurersLibraryBody'); 
     if(listBody) listBody.innerHTML = "";
