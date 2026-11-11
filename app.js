@@ -29,6 +29,7 @@ let currentOpenId = null;
 let currentOpenPolicyId = null;
 let editingPolicyId = null;
 let editingVehicleId = null;
+let editingPropertyId = null;
 let tempPolicyRisks = [];
 let isManualCommission = false;
 let selectedClientIdForPolicy = null;
@@ -144,7 +145,7 @@ function autoFillEndDate(startStr) {
     if(!startStr || startStr.length !== 10) return; 
     let parts = startStr.split('-');
     let y = parseInt(parts[0], 10);
-    if(isNaN(y) || y < 1990 || y > 2100) return; // Blokuje przeliczanie dopóki rok nie ma 4 sensownych cyfr (np. 2026)
+    if(isNaN(y) || y < 1990 || y > 2100) return;
 
     let d = new Date(startStr); 
     if(isNaN(d.getTime())) return;
@@ -254,6 +255,15 @@ function handleGlobalSearch(query) {
             html += `<div onclick="openClientFull('${v.clientId}'); document.getElementById('globalSearchResults').classList.add('hidden'); document.getElementById('globalSearch').value='';" class="p-3 hover:bg-amber-50 cursor-pointer border-b border-luxBorder"><span class="font-bold text-blue-700">🚗 ${v.brand} ${v.model || ''} (${v.plate})</span> <span class="text-xs text-textMuted ml-1">${c ? '- ' + c.name : ''}</span></div>`;
         });
     }
+
+    let foundProps = propertiesList.filter(pr => (pr.address && pr.address.toLowerCase().includes(query)) || (pr.type && pr.type.toLowerCase().includes(query)));
+    if(foundProps.length > 0) {
+        html += `<div class="p-2 bg-luxBg text-xs font-bold text-textMuted uppercase sticky top-0">Lokale i Nieruchomości</div>`;
+        foundProps.forEach(pr => {
+            let c = clientsList.find(x => String(x.id) === String(pr.clientId));
+            html += `<div onclick="openClientFull('${pr.clientId}'); document.getElementById('globalSearchResults').classList.add('hidden'); document.getElementById('globalSearch').value='';" class="p-3 hover:bg-amber-50 cursor-pointer border-b border-luxBorder"><span class="font-bold text-green-700">🏠 ${pr.type}: ${pr.address}</span> <span class="text-xs text-textMuted ml-1">${c ? '- ' + c.name : ''}</span></div>`;
+        });
+    }
     
     let foundPolicies = policiesList.filter(p => (p.number && p.number.toLowerCase().includes(query)) || (p.subject && p.subject.toLowerCase().includes(query)));
     if(foundPolicies.length > 0) {
@@ -361,8 +371,8 @@ function printTodayPlan() {
         let cName = c ? c.name : "Klient";
         let cPhone = (c && c.phone) ? ` | tel. ${c.phone}` : "";
 
-        if(p.reqAc && !p.acDone) tasksHtml += `<div class="py-1 border-b border-gray-100">☐ <b>[ZDJĘCIA AC]</b> ${cName}${cPhone} – ${p.insurer} (${p.subject})</div>`;
-        if(p.reqOc && !p.ocDone) tasksHtml += `<div class="py-1 border-b border-gray-100">☐ <b>[WYPOWIEDZENIE OC]</b> ${cName}${cPhone} – ${p.insurer} (${p.subject})</div>`;
+        if(p.reqAc && !p.acDone) tasksHtml += `<div class="py-1 border-b border-gray-100">☐ <b>[ZDJĘCIA AC / INSPEKCJA]</b> ${cName}${cPhone} – ${p.insurer} (${p.subject})</div>`;
+        if(p.reqOc && !p.ocDone) tasksHtml += `<div class="py-1 border-b border-gray-100">☐ <b>[WYPOWIEDZENIE]</b> ${cName}${cPhone} – ${p.insurer} (${p.subject})</div>`;
 
         if(p.firstPaymentDate && !p.firstPaymentPaid) {
             let dFP = new Date(p.firstPaymentDate);
@@ -451,7 +461,7 @@ function printTodayPlan() {
     window.print();
 }
 
-// ================= 6. KLIENCI, GARAŻ (Z EDYCJĄ I DOWODEM), LOKALE =================
+// ================= 6. KLIENCI, GARAŻ (DOWÓD REJ.), LOKALE (MAJĄTEK / FIRMA) =================
 function saveNewClient() {
     let name = document.getElementById('addName').value.trim(); 
     let pesel = document.getElementById('addPesel').value.trim();
@@ -536,7 +546,6 @@ function populateClientFull(id) {
     renderExternalPolicies(c.id);
 }
 
-// Niezawodny zapis edycji klienta
 function saveCfmEdits() {
     let idx = clientsList.findIndex(x => String(x.id) === String(currentOpenId));
     if(idx === -1) return alert("Błąd identyfikacji klienta!");
@@ -572,7 +581,7 @@ function saveCfmEdits() {
 }
 
 function deleteCurrentClient() { 
-    if(confirm("Usunąć trwale klienta, jego polisy i auta?")) { 
+    if(confirm("Usunąć trwale klienta, jego polisy, lokale i auta?")) { 
         clientsList = clientsList.filter(c => String(c.id) !== String(currentOpenId)); 
         policiesList = policiesList.filter(p => String(p.clientId) !== String(currentOpenId)); 
         vehiclesList = vehiclesList.filter(v => String(v.clientId) !== String(currentOpenId)); 
@@ -684,7 +693,6 @@ function renderClientVehicles(clientId) {
                     </div>
                 </div>
                 
-                <!-- Kafelki danych z dowodu z przyciskami szybkiego kopiowania -->
                 <div class="grid grid-cols-2 gap-1.5 text-xs">
                     <div class="bg-white p-1.5 rounded border border-gray-200 flex justify-between items-center">
                         <div><span class="text-[9px] text-textMuted uppercase block">Nr Rejestracyjny</span><span class="font-mono font-bold text-textDark">${v.plate || '-'}</span></div>
@@ -708,20 +716,73 @@ function renderClientVehicles(clientId) {
     }); 
 }
 
+// LOKALE / NIERUCHOMOŚCI / FIRMY: Pełny zapis, edycja i kafelki z danymi do wyceny
 function saveProperty() { 
     let t = document.getElementById('prop_type').value; 
     let a = document.getElementById('prop_address').value.trim(); 
-    let flammable = document.getElementById('prop_flammable').checked; 
-    let flood = document.getElementById('prop_flood').checked;
-    if(!a) return alert("Podaj adres nieruchomości!");
-    propertiesList.push({ id: Date.now(), clientId: currentOpenId, type: t, address: a, flammable: flammable, flood: flood }); 
-    toggleAddProperty(); 
+    if(!a) return alert("Podaj dokładny adres nieruchomości / lokalu!");
+
+    let propData = { 
+        id: editingPropertyId || Date.now(), 
+        clientId: currentOpenId, 
+        type: t, 
+        ownership: document.getElementById('prop_ownership') ? document.getElementById('prop_ownership').value : "Własność",
+        address: a, 
+        area: document.getElementById('prop_area') ? document.getElementById('prop_area').value : "",
+        year: document.getElementById('prop_year') ? document.getElementById('prop_year').value : "",
+        floor: document.getElementById('prop_floor') ? document.getElementById('prop_floor').value.trim() : "",
+        suWalls: document.getElementById('prop_suWalls') ? document.getElementById('prop_suWalls').value : "",
+        suMovables: document.getElementById('prop_suMovables') ? document.getElementById('prop_suMovables').value : "",
+        suOc: document.getElementById('prop_suOc') ? document.getElementById('prop_suOc').value : "",
+        cession: document.getElementById('prop_cession') ? document.getElementById('prop_cession').value.trim() : "",
+        secDoors: document.getElementById('prop_secDoors') ? document.getElementById('prop_secDoors').checked : false,
+        secAlarm: document.getElementById('prop_secAlarm') ? document.getElementById('prop_secAlarm').checked : false,
+        flammable: document.getElementById('prop_flammable').checked, 
+        flood: document.getElementById('prop_flood').checked 
+    };
+
+    if(editingPropertyId) {
+        let idx = propertiesList.findIndex(p => String(p.id) === String(editingPropertyId));
+        if(idx >= 0) propertiesList[idx] = propData;
+        editingPropertyId = null;
+    } else {
+        propertiesList.push(propData); 
+    }
+
+    document.getElementById('cfm_addPropertyBox').classList.add('hidden');
     syncAndRender(); 
     populateClientFull(currentOpenId); 
 }
 
+function editProperty(id) {
+    let p = propertiesList.find(x => String(x.id) === String(id));
+    if(!p) return;
+    editingPropertyId = p.id;
+    let box = document.getElementById('cfm_addPropertyBox');
+    box.classList.remove('hidden');
+
+    let titleEl = document.getElementById('prop_formTitle');
+    if(titleEl) titleEl.innerText = `Edycja lokalu: ${p.type}`;
+
+    document.getElementById('prop_type').value = p.type || "Mieszkanie";
+    if(document.getElementById('prop_ownership')) document.getElementById('prop_ownership').value = p.ownership || "Własność";
+    document.getElementById('prop_address').value = p.address || "";
+    if(document.getElementById('prop_area')) document.getElementById('prop_area').value = p.area || "";
+    if(document.getElementById('prop_year')) document.getElementById('prop_year').value = p.year || "";
+    if(document.getElementById('prop_floor')) document.getElementById('prop_floor').value = p.floor || "";
+    if(document.getElementById('prop_suWalls')) document.getElementById('prop_suWalls').value = p.suWalls || "";
+    if(document.getElementById('prop_suMovables')) document.getElementById('prop_suMovables').value = p.suMovables || "";
+    if(document.getElementById('prop_suOc')) document.getElementById('prop_suOc').value = p.suOc || "";
+    if(document.getElementById('prop_cession')) document.getElementById('prop_cession').value = p.cession || "";
+    if(document.getElementById('prop_secDoors')) document.getElementById('prop_secDoors').checked = p.secDoors || false;
+    if(document.getElementById('prop_secAlarm')) document.getElementById('prop_secAlarm').checked = p.secAlarm || false;
+    document.getElementById('prop_flammable').checked = p.flammable || false;
+    document.getElementById('prop_flood').checked = p.flood || false;
+    document.getElementById('prop_address').focus();
+}
+
 function deleteProperty(id) { 
-    if(confirm("Usunąć nieruchomość?")) { 
+    if(confirm("Usunąć nieruchomość / lokal z karty klienta?")) { 
         propertiesList = propertiesList.filter(p => String(p.id) !== String(id)); 
         syncAndRender(); 
         populateClientFull(currentOpenId); 
@@ -734,23 +795,55 @@ function renderClientProperties(clientId) {
     container.innerHTML = ''; 
     let pList = propertiesList.filter(p => String(p.clientId) === String(clientId)); 
     if(pList.length === 0) {
-        container.innerHTML = "<p class='text-xs text-textMuted'>Brak nieruchomości.</p>"; 
+        container.innerHTML = "<p class='text-xs text-textMuted'>Brak zapisanych nieruchomości / lokali.</p>"; 
         return;
     }
     pList.forEach(p => { 
-        let alerts = "";
-        if(p.flammable) alerts += `<span class="text-[10px] bg-red-100 text-red-700 px-1 rounded ml-1 font-bold">🔥 Palne</span>`;
-        if(p.flood) alerts += `<span class="text-[10px] bg-blue-100 text-blue-700 px-1 rounded ml-1 font-bold">🌊 Zalewowe</span>`;
+        let badges = "";
+        if(p.secDoors) badges += `<span class="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-bold mr-1">🚪 Drzwi antywł.</span>`;
+        if(p.secAlarm) badges += `<span class="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-bold mr-1">🚨 Alarm</span>`;
+        if(p.flammable) badges += `<span class="text-[10px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-bold mr-1">🔥 Palna konstr.</span>`;
+        if(p.flood) badges += `<span class="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-bold mr-1">🌊 Zalewowy</span>`;
+        
+        let suSummary = [];
+        if(p.suWalls) suSummary.push(`Mury: ${formatPLN(p.suWalls)}`);
+        if(p.suMovables) suSummary.push(`Ruchomości: ${formatPLN(p.suMovables)}`);
+        if(p.suOc) suSummary.push(`OC: ${formatPLN(p.suOc)}`);
+
         container.innerHTML += `
-            <div class="bg-luxBg p-3 rounded-lg border border-luxBorder relative group flex justify-between items-center">
-                <div>
-                    <p class="font-bold text-textDark">🏠 ${p.type} ${alerts}</p>
-                    <p class="text-sm text-textMuted">${p.address || 'Brak'}</p>
+            <div class="bg-luxBg p-3.5 rounded-xl border border-luxBorder space-y-2">
+                <div class="flex justify-between items-start border-b border-gray-200 pb-2">
+                    <div>
+                        <p class="font-bold text-textDark text-sm">🏠 ${p.type} <span class="text-xs font-normal text-textMuted">(${p.ownership || 'Własność'})</span></p>
+                        <div class="flex items-center gap-1.5 mt-0.5">
+                            <p class="text-xs font-semibold text-goldAccent">${p.address || 'Brak adresu'}</p>
+                            ${p.address ? `<button onclick="copyToClipboard('${p.address}', 'Adres lokalu')" class="text-[10px] bg-gray-200 hover:bg-gray-300 px-1.5 py-0.5 rounded font-bold">📋</button>` : ''}
+                        </div>
+                    </div>
+                    <div class="flex gap-1.5">
+                        <button onclick="editProperty('${p.id}')" class="text-[11px] bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100 px-2 py-0.5 rounded font-bold">✏️ Edytuj</button>
+                        <button onclick="deleteProperty('${p.id}')" class="text-[11px] bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 px-2 py-0.5 rounded font-bold">&times;</button>
+                    </div>
                 </div>
-                <div class="flex gap-1">
-                    <button onclick="copyToClipboard('${p.address}', 'Adres lokalu')" class="text-xs bg-gray-200 px-2 py-1 rounded">📋</button>
-                    <button onclick="deleteProperty('${p.id}')" class="text-red-400 hover:text-red-600 font-bold px-2">&times;</button>
+
+                <div class="grid grid-cols-3 gap-1.5 text-xs">
+                    <div class="bg-white p-1.5 rounded border border-gray-200 flex justify-between items-center">
+                        <div><span class="text-[9px] text-textMuted uppercase block">Metraż</span><span class="font-bold text-textDark">${p.area ? p.area + ' m²' : '-'}</span></div>
+                        ${p.area ? `<button onclick="copyToClipboard('${p.area}', 'Metraż')" class="text-[10px] bg-gray-100 hover:bg-gray-200 px-1 py-0.5 rounded">📋</button>` : ''}
+                    </div>
+                    <div class="bg-white p-1.5 rounded border border-gray-200 flex justify-between items-center">
+                        <div><span class="text-[9px] text-textMuted uppercase block">Rok budowy</span><span class="font-bold text-textDark">${p.year || '-'}</span></div>
+                        ${p.year ? `<button onclick="copyToClipboard('${p.year}', 'Rok budowy')" class="text-[10px] bg-gray-100 hover:bg-gray-200 px-1 py-0.5 rounded">📋</button>` : ''}
+                    </div>
+                    <div class="bg-white p-1.5 rounded border border-gray-200">
+                        <span class="text-[9px] text-textMuted uppercase block">Kondygnacja</span>
+                        <span class="font-bold text-textDark truncate block">${p.floor || '-'}</span>
+                    </div>
                 </div>
+
+                ${suSummary.length > 0 ? `<div class="bg-white px-2 py-1.5 rounded border border-gray-200 text-[11px] font-semibold text-indigo-900">💰 SU: ${suSummary.join(' | ')}</div>` : ''}
+                ${p.cession ? `<div class="bg-amber-50 px-2 py-1 rounded border border-amber-200 text-[11px] flex justify-between items-center"><span class="text-amber-900">🏦 Cesja: <b>${p.cession}</b></span> <button onclick="copyToClipboard('${p.cession}', 'Cesja bankowa')" class="text-[10px] bg-white border border-amber-300 px-1.5 py-0.5 rounded font-bold">📋</button></div>` : ''}
+                ${badges ? `<div class="pt-0.5">${badges}</div>` : ''}
             </div>`; 
     }); 
 }
@@ -831,7 +924,7 @@ function renderClientPolicies(clientId) {
     }); 
 }
 
-// ================= 7. KREATOR POLISY I RĘCZNA PROWIZJA =================
+// ================= 7. KREATOR POLISY (AUTOMAT GARAŻU I LOKALI ORAZ RĘCZNA PROWIZJA) =================
 function renderPolicies() {
     const tbody = document.getElementById('policiesTableBody'); 
     if(!tbody) return; 
@@ -885,10 +978,11 @@ function populatePolicyModal(editId = null, prefillClientId = null) {
     document.getElementById('p_clientNotFoundBox').classList.add('hidden');
     document.getElementById('p_btnNext').disabled = true;
 
-    ['p_quickName', 'p_quickBirth', 'p_quickLicense', 'p_number', 'p_dateStart', 'p_dateEnd', 'p_carBrand', 'p_carModel', 'p_carPlate', 'p_carVin', 'p_homeAddress', 'p_riskNameInput', 'p_riskPremInput', 'p_riskPctInput', 'p_premium', 'p_commValue', 'p_commNote', 'p_firstPaymentDate'].forEach(id => {
+    ['p_quickName', 'p_quickBirth', 'p_quickLicense', 'p_number', 'p_dateStart', 'p_dateEnd', 'p_carBrand', 'p_carModel', 'p_carPlate', 'p_carVin', 'p_propArea', 'p_propYear', 'p_propCession', 'p_homeAddress', 'p_riskNameInput', 'p_riskPremInput', 'p_riskPctInput', 'p_premium', 'p_commValue', 'p_commNote', 'p_firstPaymentDate'].forEach(id => {
         let el = document.getElementById(id);
         if(el) el.value = "";
     });
+    if(document.getElementById('p_propType')) document.getElementById('p_propType').value = "Mieszkanie";
     document.getElementById('p_reqAc').checked = false;
     document.getElementById('p_reqOc').checked = false;
     document.getElementById('p_installments').value = "1";
@@ -941,7 +1035,6 @@ function populatePolicyModal(editId = null, prefillClientId = null) {
             }
             renderTempRisks();
             
-            // Zachowaj ręcznie wpisaną składkę i prowizję z edytowanej polisy
             document.getElementById('p_premium').value = p.premium || 0;
             document.getElementById('p_commValue').value = p.commissionAmt || 0;
             if(p.isManualComm) {
@@ -967,6 +1060,7 @@ function populatePolicyModal(editId = null, prefillClientId = null) {
     updateRiskDatalist();
 }
 
+// Wybór pojazdu z garażu w Kroku 3
 function populateGarageSelectForPolicy() {
     let sel = document.getElementById('p_garageSelect');
     if(!sel) return;
@@ -987,6 +1081,29 @@ function fillVehicleFromGarage(vehId) {
     document.getElementById('p_carPlate').value = v.plate || "";
     document.getElementById('p_carVin').value = v.vin || "";
     assembleSubjectString();
+}
+
+// Wybór lokalu z listy nieruchomości klienta w Kroku 3
+function populatePropertySelectForPolicy() {
+    let sel = document.getElementById('p_propertySelect');
+    if(!sel) return;
+    sel.innerHTML = `<option value="">-- Wybierz zapisany lokal klienta --</option>`;
+    if(!selectedClientIdForPolicy) return;
+    let cProps = propertiesList.filter(pr => String(pr.clientId) === String(selectedClientIdForPolicy));
+    cProps.forEach(pr => {
+        sel.innerHTML += `<option value="${pr.id}">🏠 ${pr.type}: ${pr.address} ${pr.area ? '('+pr.area+' m²)' : ''}</option>`;
+    });
+}
+
+function fillPropertyFromList(propId) {
+    if(!propId) return;
+    let pr = propertiesList.find(x => String(x.id) === String(propId));
+    if(!pr) return;
+    if(document.getElementById('p_propType')) document.getElementById('p_propType').value = pr.type || "Mieszkanie";
+    if(document.getElementById('p_propArea')) document.getElementById('p_propArea').value = pr.area || "";
+    if(document.getElementById('p_propYear')) document.getElementById('p_propYear').value = pr.year || "";
+    if(document.getElementById('p_propCession')) document.getElementById('p_propCession').value = pr.cession || "";
+    document.getElementById('p_homeAddress').value = pr.address || "";
 }
 
 function resetPolicyClientChoice() {
@@ -1100,7 +1217,6 @@ function checkRiskDictForAutoFill() {
     }
 }
 
-// Oznaczenie, że agent wpisał prowizję z ręki (nadrzędna nad automatem)
 function markCommissionAsManual() {
     isManualCommission = true;
     let badge = document.getElementById('p_commManualBadge');
@@ -1123,7 +1239,6 @@ function addRiskToTemp() {
     let existingRuleIdx = commDictList.findIndex(r => r.insurer === ins && r.risk === name);
 
     if(!isNaN(pct)) {
-        // Jeśli agent podał stawkę %, zapisz/zaktualizuj ją automatycznie w słowniku dla tego TU!
         if(existingRuleIdx >= 0) {
             commDictList[existingRuleIdx].pct = pct;
         } else {
@@ -1177,7 +1292,6 @@ function renderTempRisks() {
 
     if(tempPolicyRisks.length > 0) {
         document.getElementById('p_premium').value = totalPrem.toFixed(2);
-        // Nadpisuj pole prowizji automatem TYLKO wtedy, gdy agent nie wpisał wcześniej własnej kwoty z ręki
         if(!isManualCommission) {
             document.getElementById('p_commValue').value = totalComm.toFixed(2);
         }
@@ -1232,6 +1346,7 @@ function policyStep(direction) {
     if(currentPolicyStep === 3) {
         handlePolicyTypeChange();
         populateGarageSelectForPolicy();
+        populatePropertySelectForPolicy();
     }
 }
 
@@ -1265,9 +1380,12 @@ function savePolicy() {
     let carModel = document.getElementById('p_carModel').value.trim();
     let carPlate = document.getElementById('p_carPlate').value.trim().toUpperCase();
     let carVin = document.getElementById('p_carVin') ? document.getElementById('p_carVin').value.trim().toUpperCase() : "";
+    let subjectStr = "";
 
+    // 1. Jeśli Komunikacja -> Złóż nazwę i automatycznie zapisz auto do Garażu klienta
     if(type === 'Komunikacja') {
         assembleSubjectString();
+        subjectStr = document.getElementById('p_homeAddress').value.trim() || "Pojazd";
         if(carBrand) rememberBrand(carBrand);
         if(selectedClientIdForPolicy && carBrand && carPlate) {
             let existingCar = vehiclesList.find(v => String(v.clientId) === String(selectedClientIdForPolicy) && v.plate === carPlate);
@@ -1292,9 +1410,49 @@ function savePolicy() {
                 existingCar.vin = carVin;
             }
         }
+    } 
+    // 2. Jeśli Majątek / Firmowe -> Złóż opis i AUTOMATYCZNIE zapisz lokal do Lokali klienta!
+    else {
+        let addr = document.getElementById('p_homeAddress').value.trim();
+        let propType = document.getElementById('p_propType') ? document.getElementById('p_propType').value : "Mieszkanie";
+        let propArea = document.getElementById('p_propArea') ? document.getElementById('p_propArea').value : "";
+        let propYear = document.getElementById('p_propYear') ? document.getElementById('p_propYear').value : "";
+        let propCession = document.getElementById('p_propCession') ? document.getElementById('p_propCession').value.trim() : "";
+
+        if(addr && (type === 'Majątek' || type === 'Firmowe')) {
+            subjectStr = `${propType}${propArea ? ' ('+propArea+'m²)' : ''} - ${addr}`;
+            if(selectedClientIdForPolicy) {
+                let existingProp = propertiesList.find(pr => String(pr.clientId) === String(selectedClientIdForPolicy) && pr.address && pr.address.toLowerCase() === addr.toLowerCase());
+                if(!existingProp) {
+                    propertiesList.push({
+                        id: Date.now() + 2,
+                        clientId: selectedClientIdForPolicy,
+                        type: propType,
+                        ownership: "Własność",
+                        address: addr,
+                        area: propArea,
+                        year: propYear,
+                        floor: "",
+                        suWalls: "",
+                        suMovables: "",
+                        suOc: "",
+                        cession: propCession,
+                        secDoors: false,
+                        secAlarm: false,
+                        flammable: false,
+                        flood: false
+                    });
+                } else {
+                    if(propArea && !existingProp.area) existingProp.area = propArea;
+                    if(propYear && !existingProp.year) existingProp.year = propYear;
+                    if(propCession && !existingProp.cession) existingProp.cession = propCession;
+                }
+            }
+        } else {
+            subjectStr = addr || "Brak opisu";
+        }
     }
 
-    let subjectStr = document.getElementById('p_homeAddress').value.trim() || "Brak opisu";
     let sType = document.querySelector('input[name="p_salesType"]:checked').value;
     let reqAc = document.getElementById('p_reqAc').checked; 
     let reqOc = document.getElementById('p_reqOc').checked;
@@ -1315,7 +1473,6 @@ function savePolicy() {
         }
     }
 
-    // Pobranie ostatecznych kwot (ręczna prowizja z pola ma absolutny priorytet!)
     let finalPremium = parseFloat(String(document.getElementById('p_premium').value).replace(',', '.')) || 0;
     let finalComm = parseFloat(String(document.getElementById('p_commValue').value).replace(',', '.')) || 0;
     let commNote = document.getElementById('p_commNote') ? document.getElementById('p_commNote').value.trim() : "";
@@ -1363,7 +1520,6 @@ function savePolicy() {
     }
 }
 
-// Bezpośredni zapis ręcznej korekty prowizji i notatki w szufladzie polisy
 function saveDrawerCommissionOverride() {
     if(!currentOpenPolicyId) return;
     let p = policiesList.find(x => String(x.id) === String(currentOpenPolicyId));
@@ -1820,7 +1976,6 @@ function renderDashboard() {
                 monthComm += parseFloat(p.commissionAmt) || 0; 
                 countPolicies++; 
             } else if(p.firstPaymentPaid) {
-                // Jeśli polisa została wypowiedziana po opłaceniu I raty, dolicz tylko faktycznie opłaconą część
                 let numInst = p.installments || 1;
                 monthPrem += getFirstInstallmentAmount(p);
                 monthComm += (parseFloat(p.commissionAmt) || 0) / numInst;
@@ -1855,7 +2010,6 @@ function renderDashboard() {
             }
         }
 
-        // Jeżeli polisa została wypowiedziana (np. po sprzedaży auta przed II ratą), nie pokazuj kolejnych rat jako zaległych!
         if(!isCanceled) {
             let makeOverdueRow = (rataName, dateStr, amt) => { overdueHtml += `<div class="flex justify-between items-center bg-red-50 p-2 rounded-lg border border-red-200"><div><span class="font-bold text-red-800 cursor-pointer hover:underline" onclick="openDrawer('policy', '${p.id}')">${c.name}</span><p class="text-xs text-red-600">${rataName}: <span class="font-bold">${dateStr}</span> (${formatPLN(amt)})</p></div></div>`; };
             let makeUpcomingRow = (rataName, dateStr, amt) => { upcomingHtml += `<div class="flex justify-between items-center bg-amber-50 p-2 rounded-lg border border-amber-200"><div><span class="font-bold text-amber-900 cursor-pointer hover:underline" onclick="openDrawer('policy', '${p.id}')">${c.name}</span><p class="text-xs text-amber-700">${rataName}: <span class="font-bold">${dateStr}</span> (${formatPLN(amt)})</p></div></div>`; };
@@ -1927,7 +2081,6 @@ function renderFinances() {
         let partComm = totalComm / numInst;
         
         let processInstallment = (rataLabel, dateStr, amountStr, isPaid) => {
-            // Jeśli polisa została wypowiedziana po sprzedaży auta, nieopłacone raty wygasają (nie liczą się do długu ani do prowizji!)
             if(isCanceled && !isPaid) return;
 
             let cAmt = parseFloat(amountStr) || 0;
@@ -2005,7 +2158,6 @@ function clearFinanceFilter() {
     renderFinances(); 
 }
 
-// Eksport zestawienia prowizji i polis do pliku CSV (Excel)
 function exportFinancesCSV() {
     let filterVal = document.getElementById('financeMonthFilter') ? document.getElementById('financeMonthFilter').value : "";
     let statusFilter = document.getElementById('financeStatusFilter') ? document.getElementById('financeStatusFilter').value : 'all';
@@ -2047,7 +2199,6 @@ function exportFinancesCSV() {
         }
     });
 
-    // Dodanie BOM (\uFEFF), aby polski Excel bezbłędnie odczytał polskie znaki
     let csvContent = "\uFEFF" + csvRows.join("\r\n");
     let blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     let url = URL.createObjectURL(blob);

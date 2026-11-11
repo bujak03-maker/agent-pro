@@ -226,17 +226,28 @@ function calcKwFromKm(kmVal) {
     }
 }
 
+// Otwieranie / zamykanie rozbudowanego formularza lokalu / nieruchomości
 function toggleAddProperty() { 
     let box = document.getElementById('cfm_addPropertyBox');
+    if (typeof editingPropertyId !== 'undefined') editingPropertyId = null;
+
     box.classList.toggle('hidden'); 
     if (!box.classList.contains('hidden')) {
-        document.getElementById('prop_address').value = "";
-        document.getElementById('prop_flammable').checked = false;
-        document.getElementById('prop_flood').checked = false;
+        let titleEl = document.getElementById('prop_formTitle');
+        if(titleEl) titleEl.innerText = "Nowy Lokal / Nieruchomość";
+        if(document.getElementById('prop_type')) document.getElementById('prop_type').value = "Mieszkanie";
+        if(document.getElementById('prop_ownership')) document.getElementById('prop_ownership').value = "Własność";
+        ['prop_address', 'prop_area', 'prop_year', 'prop_floor', 'prop_suWalls', 'prop_suMovables', 'prop_suOc', 'prop_cession'].forEach(id => {
+            if(document.getElementById(id)) document.getElementById(id).value = "";
+        });
+        ['prop_secDoors', 'prop_secAlarm', 'prop_flammable', 'prop_flood'].forEach(id => {
+            if(document.getElementById(id)) document.getElementById(id).checked = false;
+        });
         document.getElementById('prop_address').focus();
     }
 }
 
+// Przełączanie Krok 3 w kreatorze polisy (Komunikacja vs Majątek/Firmowe)
 function handlePolicyTypeChange() {
     let typeEl = document.getElementById('p_type');
     if (!typeEl) return;
@@ -249,5 +260,7 @@ function handlePolicyTypeChange() {
     }
     if (isCar && typeof populateGarageSelectForPolicy === 'function') {
         populateGarageSelectForPolicy();
+    } else if (!isCar && typeof populatePropertySelectForPolicy === 'function') {
+        populatePropertySelectForPolicy();
     }
 }
