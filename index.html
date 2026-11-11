@@ -159,7 +159,6 @@
                 <div class="lux-card p-5 rounded-2xl border-l-4 border-goldAccent"><span class="text-[10px] font-bold text-textMuted uppercase block">Wystawione (Ten Mc)</span><p id="dash_countPolicies" class="text-2xl font-extrabold text-textDark mt-1">0</p></div>
                 <div class="lux-card p-5 rounded-2xl border-l-4 border-indigo-500"><span class="text-[10px] font-bold text-textMuted uppercase block">Przypis Netto (Ten Mc)</span><p id="dash_monthPrem" class="text-2xl font-extrabold text-indigo-600 mt-1">0,00 PLN</p></div>
                 <div class="lux-card p-5 rounded-2xl border-l-4 border-green-500"><span class="text-[10px] font-bold text-textMuted uppercase block">Prowizja (Ten Mc)</span><p id="dash_monthComm" class="text-2xl font-extrabold text-green-600 mt-1">0,00 PLN</p></div>
-                <!-- KASA W RĘKU (PORTFEL GOTÓWKOWY) -->
                 <div class="lux-card p-5 rounded-2xl border-l-4 border-emerald-600 bg-emerald-50/50">
                     <span class="text-[10px] font-bold text-emerald-800 uppercase block">💵 Gotówka do wpłaty do TU</span>
                     <p id="dash_cashInHand" class="text-2xl font-extrabold text-emerald-700 mt-1">0,00 PLN</p>
@@ -187,7 +186,7 @@
             </div>
 
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <!-- WZNOWIENIA W 30 DNIACH Z OPCJĄ "ZAŁATWIONE / WZNOWIONE" -->
+                <!-- WZNOWIENIA W 30 DNIACH -->
                 <div class="lux-card rounded-2xl p-6 border-t-4 border-amber-500 lg:col-span-2 space-y-4">
                     <div class="flex justify-between items-center border-b border-luxBorder pb-2">
                         <h3 class="font-bold text-lg flex items-center gap-2">🔄 Kończy się w ciągu 30 dni (Aktywne do kontaktu)</h3>
@@ -215,9 +214,9 @@
                     </div>
                 </div>
 
-                <!-- NOWY KAFEL: DO ROZLICZENIA Z TU (SKANY I GOTÓWKA) -->
+                <!-- KAFEL: DO ROZLICZENIA Z TU (SKANY I GOTÓWKA) -->
                 <div class="lux-card rounded-2xl p-6 border-t-4 border-purple-500">
-                    <h3 class="font-bold text-lg mb-3 flex items-center justify-between text-purple-900">
+                    <h3 class="font-bold text-lg mb-2 flex items-center justify-between text-purple-900">
                         <span>📤 Rozliczenie z TU</span>
                         <span id="dash_tuSettleCount" class="text-xs bg-purple-100 text-purple-800 font-bold px-2 py-0.5 rounded">0 do zrobienia</span>
                     </h3>
@@ -230,14 +229,20 @@
                     <div id="dash_overdue" class="space-y-3 max-h-60 overflow-y-auto pr-1"></div>
                 </div>
                 
-                <div class="lux-card rounded-2xl p-6 border-t-4 border-goldAccent">
-                    <h3 class="font-bold text-lg mb-4 flex items-center gap-2">💸 Raty (najbliższe 7 dni)</h3>
-                    <div id="dash_upcoming" class="space-y-3 max-h-60 overflow-y-auto pr-1"></div>
+                <div class="lux-card rounded-2xl p-6 border-t-4 border-goldAccent space-y-4">
+                    <div>
+                        <h3 class="font-bold text-lg mb-3 flex items-center gap-2">💸 Raty (najbliższe 7 dni)</h3>
+                        <div id="dash_upcoming" class="space-y-3 max-h-40 overflow-y-auto pr-1"></div>
+                    </div>
+                    <div class="border-t border-luxBorder pt-3">
+                        <h4 class="font-bold text-xs uppercase text-blue-800 mb-2">🎂 Urodziny i Przeglądy (30 dni)</h4>
+                        <div id="dash_birthdays" class="space-y-1.5 max-h-32 overflow-y-auto pr-1"></div>
+                    </div>
                 </div>
             </div>
         </section>
 
-        <!-- KLIENCI (Z WARTOŚCIĄ LTV PRZYPIS/PROWIZJA) -->
+        <!-- KLIENCI -->
         <section id="tab-clients" class="space-y-6 hidden">
             <div class="flex flex-col sm:flex-row justify-between items-center gap-4"><h2 class="text-2xl font-bold">Baza Klientów</h2><button onclick="openClientModal()" class="bg-goldAccent hover:bg-goldHover text-white font-semibold px-5 py-2.5 rounded-xl shadow-md">+ Dodaj Klienta</button></div>
             <div class="lux-card rounded-2xl overflow-hidden shadow-sm">
@@ -246,7 +251,7 @@
             </div>
         </section>
         
-        <!-- POLISY (Z WYSZARZANIEM WYGASŁYCH I STATUSAMI PROWIZJI) -->
+        <!-- POLISY -->
         <section id="tab-policies" class="space-y-6 hidden">
             <div class="flex flex-col sm:flex-row justify-between items-center gap-4"><h2 class="text-2xl font-bold">Zarządzanie Polisami</h2><button onclick="openPolicyModal()" class="bg-goldAccent hover:bg-goldHover text-white font-semibold px-5 py-2.5 rounded-xl shadow-md">+ Dodaj polisę</button></div>
             <div class="lux-card rounded-2xl overflow-hidden shadow-sm">
@@ -268,7 +273,7 @@
             </div>
         </section>
 
-        <!-- ODNOWIENIA (Z MOŻLIWOŚCIĄ ARCHIWIZACJI KART) -->
+        <!-- ODNOWIENIA -->
         <section id="tab-renewals" class="space-y-6 hidden">
             <div class="flex justify-between items-center">
                 <h2 class="text-2xl font-bold text-textDark">Lejek Odnowień (&lt; 45 dni)</h2>
@@ -373,7 +378,7 @@
 
     <!-- MODALE -->
     
-    <!-- KARTA KLIENTA PEŁNA (Z PODSUMOWANIEM WARTOŚCI LTV I ZŁOCENIEM AKTYWNYCH POLIS) -->
+    <!-- KARTA KLIENTA PEŁNA -->
     <div id="clientFullModalOverlay" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-2 sm:p-4" onclick="if(event.target === this) closeClientFull()">
         <div class="bg-luxCard shadow-2xl modal-fullscreen rounded-2xl flex flex-col relative overflow-hidden mx-auto my-auto border border-luxBorder" onclick="event.stopPropagation()">
             <div class="bg-luxBg border-b border-luxBorder px-6 py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sticky top-0 z-10">
@@ -388,7 +393,7 @@
                     </div>
                 </div>
 
-                <!-- WARTOŚĆ KLIENTA (LTV) W NAGŁÓWKU -->
+                <!-- WARTOŚĆ KLIENTA (LTV) -->
                 <div class="flex items-center gap-3 bg-white px-4 py-2 rounded-xl border border-luxBorder shadow-sm">
                     <div>
                         <span class="text-[9px] uppercase font-bold text-textMuted block">Przypis Netto Klienta</span>
@@ -448,7 +453,6 @@
 
                     <!-- Kolumna 2: Garaż oraz Lokale -->
                     <div class="space-y-6">
-                        <!-- GARAŻ -->
                         <div>
                             <div class="flex justify-between items-center border-b border-luxBorder pb-2">
                                 <h3 class="font-bold text-lg text-textDark">Garaż (Dane z dowodu)</h3>
@@ -486,7 +490,6 @@
                             <div id="cfm_vehiclesList" class="space-y-3 mt-3"></div>
                         </div>
 
-                        <!-- LOKALE -->
                         <div>
                             <div class="flex justify-between items-center border-b border-luxBorder pb-2">
                                 <h3 class="font-bold text-lg text-textDark">Lokale / Majątek (Dane do wyceny)</h3>
@@ -547,7 +550,7 @@
                         </div>
                     </div>
 
-                    <!-- Kolumna 3: Polisy (Sortowane chronologicznie, złocone aktywne, wyszarzone archiwalne) -->
+                    <!-- Kolumna 3: Polisy -->
                     <div class="space-y-6">
                         <div class="flex justify-between items-center border-b border-luxBorder pb-2">
                             <h3 class="font-bold text-lg text-textDark">Historia Polis (Najnowsze wyżej)</h3>
@@ -569,7 +572,7 @@
         </div>
     </div>
 
-    <!-- SZUFLADA POLISY (Z ODPISAMI, PER-RATA PROWIZJĄ I ROZLICZENIEM Z TU) -->
+    <!-- SZUFLADA POLISY (KOMPLETNA - ZE WSZYSTKIMI ELEMENTAMI) -->
     <div id="policyDrawerOverlay" class="fixed inset-0 bg-black/20 backdrop-blur-sm z-50 hidden transition-opacity" onclick="closeDrawer('policy')"></div>
     <div id="policyDrawer" class="fixed top-0 right-0 h-full w-full max-w-md bg-luxCard shadow-2xl z-50 drawer-closed transition-transform duration-300 flex flex-col border-l border-luxBorder">
         <div class="p-6 border-b border-luxBorder bg-luxBg/50 relative">
@@ -619,8 +622,10 @@
                     </div>
                 </div>
 
-                <!-- KAFELKI FINANSOWE: PRZYPIS, ODPIS I PRZYPIS NETTO -->
-                <h3 class="font-bold text-lg border-b border-luxBorder pb-1 mb-3 mt-6">Finanse i Odpis (Storno)</h3>
+                <!-- KAFELKI FINANSOWE: RYZYKA, PRZYPIS, ODPIS I PRZYPIS NETTO -->
+                <h3 class="font-bold text-lg border-b border-luxBorder pb-1 mb-3 mt-6">Finanse, Ryzyka i Odpis (Storno)</h3>
+                <div id="pd_risksList" class="space-y-1.5 text-xs bg-gray-50 border p-3 rounded-xl mb-3"></div>
+
                 <div class="p-3.5 bg-luxBg rounded-xl border border-luxBorder space-y-3 text-sm">
                     <div class="flex justify-between items-center"><span class="text-textMuted">Przypis pierwotny:</span><span id="pd_premiumRaw" class="font-semibold">-</span></div>
                     
@@ -646,14 +651,18 @@
                         </div>
                     </div>
 
-                    <div class="border-t border-luxBorder pt-2">
-                        <div class="flex justify-between items-center mb-1">
+                    <div class="border-t border-luxBorder pt-2 space-y-2">
+                        <div class="flex justify-between items-center">
                             <label class="text-[10px] uppercase font-bold text-green-800">Prowizja łączna polisy (PLN):</label>
                             <span id="pd_commManualStatus" class="text-[9px] text-amber-800 font-bold"></span>
                         </div>
                         <div class="flex gap-2">
                             <input type="number" step="0.01" id="pd_commInput" class="w-full border border-green-300 bg-white p-1.5 rounded-lg text-sm font-bold text-green-700">
                             <button onclick="saveDrawerCommissionOverride()" class="bg-green-600 hover:bg-green-700 text-white text-xs font-bold px-3 rounded-lg">Zapisz</button>
+                        </div>
+                        <div>
+                            <label class="text-[10px] uppercase font-bold text-textMuted block mb-1">Notatka do prowizji / rozliczenia:</label>
+                            <input type="text" id="pd_commNoteInput" onchange="saveDrawerCommissionOverride()" placeholder="np. Korekta z rachunku TU" class="w-full border border-luxBorder bg-white p-1.5 rounded-lg text-xs">
                         </div>
                     </div>
                 </div>
@@ -722,7 +731,7 @@
                 </div>
             </div>
 
-            <!-- KROK 2 (WZBOGACONY O FORMĘ PŁATNOŚCI: GOTÓWKA / PRZELEW) -->
+            <!-- KROK 2 -->
             <div id="pStep2" class="space-y-4 hidden">
                 <div class="flex gap-4 p-3 bg-blue-50 border border-blue-200 rounded-xl mb-4">
                     <label class="flex items-center text-sm font-bold cursor-pointer"><input type="radio" name="p_salesType" value="new" checked class="mr-2 accent-indigo-600"> Nowy Biznes</label>
@@ -831,7 +840,7 @@
                 </div>
             </div>
 
-            <!-- KROK 4 (Z ODPISAMI I RATAMI DO 12) -->
+            <!-- KROK 4 -->
             <div id="pStep4" class="space-y-4 hidden">
                 <div class="bg-gray-50 border border-gray-200 rounded-xl p-4">
                     <h4 class="font-bold text-sm text-textDark mb-3">🛡️ Kalkulator Ryzyk (Pomocniczy)</h4>
@@ -872,11 +881,10 @@
                         </div>
                     </div>
 
-                    <!-- POLE ODPISU W KREATORZE -->
                     <div class="grid grid-cols-3 gap-2 bg-white p-2.5 rounded-lg border border-red-200 items-center">
                         <div>
                             <label class="text-[10px] uppercase font-bold text-red-700 block">Odpis / Zwrot (PLN)</label>
-                            <input type="number" step="0.01" id="p_odpis" oninput="recalcNetPremiumModal();" placeholder="0.00" class="w-full border border-red-300 rounded p-1 text-xs font-bold text-red-600">
+                            <input type="number" step="0.01" id="p_odpis" oninput="recalcNetPremiumModal(); calcInstallmentsOnly();" placeholder="0.00" class="w-full border border-red-300 rounded p-1 text-xs font-bold text-red-600">
                         </div>
                         <div>
                             <label class="text-[10px] uppercase font-bold text-textMuted block">Powód odpisu</label>
@@ -1000,9 +1008,9 @@
         </div>
     </div>
 
-    <script src="firebase-config.js"></script>
-    <script src="ui.js"></script>
-    <script src="app.js"></script>
+    <script src="firebase-config.js?v=2.0"></script>
+    <script src="ui.js?v=2.0"></script>
+    <script src="app.js?v=2.0"></script>
 
 </body>
 </html>
