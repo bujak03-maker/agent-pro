@@ -131,7 +131,7 @@
                 </div>
             </div>
             
-            <div class="w-full lg:w-96 relative">
+            <div class="w-full lg:w-80 relative">
                 <input type="text" id="globalSearch" oninput="handleGlobalSearch(this.value)" placeholder="Szukaj klienta, auta, adresu, polisy..." class="w-full bg-luxBg border border-luxBorder rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-goldAccent">
                 <div id="globalSearchResults" class="absolute top-full left-0 right-0 mt-2 bg-white rounded-xl shadow-2xl border border-luxBorder hidden z-50 max-h-72 overflow-y-auto"></div>
             </div>
@@ -143,6 +143,7 @@
                 <button onclick="switchTab('offers')" id="btn-offers" class="px-3 py-2 rounded-lg text-sm font-medium text-textMuted hover:text-textDark">Oferty</button>
                 <button onclick="switchTab('renewals')" id="btn-renewals" class="px-3 py-2 rounded-lg text-sm font-medium text-textMuted hover:text-textDark">Odnowienia</button>
                 <button onclick="switchTab('finances')" id="btn-finances" class="px-3 py-2 rounded-lg text-sm font-medium text-textMuted hover:text-textDark">Finanse</button>
+                <button onclick="switchTab('stats')" id="btn-stats" class="px-3 py-2 rounded-lg text-sm font-medium text-textMuted hover:text-textDark">📈 Statystyki</button>
                 <button onclick="switchTab('calendar')" id="btn-calendar" class="px-3 py-2 rounded-lg text-sm font-medium text-textMuted hover:text-textDark">📅 Kalendarz</button>
                 <div class="w-px h-6 bg-luxBorder mx-1"></div>
                 <button onclick="switchTab('settings')" id="btn-settings" class="px-3 py-2 rounded-lg text-sm font-medium text-textMuted hover:text-textDark">⚙️</button>
@@ -325,6 +326,182 @@
             </div>
         </section>
 
+        <!-- NOWA ZAKŁADKA: 📈 STATYSTYKI (KOMBAJN ANALITYCZNY) -->
+        <section id="tab-stats" class="space-y-6 hidden">
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <div>
+                    <h2 class="text-2xl font-bold text-textDark">📈 Analityka Portfela i Statystyki</h2>
+                    <p class="text-xs text-textMuted">Kompleksowe zestawienie sprzedaży, retencji klientów, skuteczności TU oraz potencjału dosprzedaży.</p>
+                </div>
+                <div class="flex items-center gap-2 bg-luxCard p-2 rounded-xl border border-luxBorder shadow-sm">
+                    <span class="text-xs font-bold text-textMuted uppercase ml-1">Badany Rok:</span>
+                    <select id="statsYearFilter" onchange="renderStatistics()" class="border border-goldAccent bg-amber-50/50 rounded-lg px-3 py-1.5 text-sm font-extrabold text-textDark outline-none">
+                        <option value="all">Cała historia</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- GŁÓWNE KAFELKI KPI (W DANYM ROKU ORAZ W OGÓLE) -->
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div class="lux-card p-5 rounded-2xl border-l-4 border-goldAccent">
+                    <span class="text-[10px] font-bold text-textMuted uppercase block">Sprzedane Polisy (Rok / Ogółem)</span>
+                    <p class="text-2xl font-extrabold text-textDark mt-1"><span id="st_policiesYear" class="text-goldAccent">0</span> <span class="text-sm font-normal text-textMuted">/ <span id="st_policiesTotal">0</span> szt.</span></p>
+                    <span id="st_policiesSub" class="text-[11px] text-textMuted block mt-1">Nowe vs Wznowienia</span>
+                </div>
+                <div class="lux-card p-5 rounded-2xl border-l-4 border-blue-500">
+                    <span class="text-[10px] font-bold text-textMuted uppercase block">Klienci (Aktywni w roku / W bazie)</span>
+                    <p class="text-2xl font-extrabold text-blue-700 mt-1"><span id="st_clientsYear">0</span> <span class="text-sm font-normal text-textMuted">/ <span id="st_clientsTotal">0</span> os.</span></p>
+                    <span id="st_clientsSub" class="text-[11px] text-blue-800 font-semibold block mt-1">W tym nowi: 0</span>
+                </div>
+                <div class="lux-card p-5 rounded-2xl border-l-4 border-indigo-600">
+                    <span class="text-[10px] font-bold text-textMuted uppercase block">Przypis Netto (Wybrany okres)</span>
+                    <p id="st_netPremium" class="text-2xl font-extrabold text-indigo-700 mt-1">0,00 PLN</p>
+                    <span id="st_avgPremium" class="text-[11px] text-textMuted block mt-1">Średnia składka: 0,00 PLN</span>
+                </div>
+                <div class="lux-card p-5 rounded-2xl border-l-4 border-green-600">
+                    <span class="text-[10px] font-bold text-textMuted uppercase block">Prowizja Łączna (Wybrany okres)</span>
+                    <p id="st_totalComm" class="text-2xl font-extrabold text-green-600 mt-1">0,00 PLN</p>
+                    <span id="st_avgComm" class="text-[11px] text-green-800 font-semibold block mt-1">Średnio na polisę: 0,00 PLN</span>
+                </div>
+            </div>
+
+            <!-- SEKCJA 1: RANKING TU ORAZ STRUKTURA PORTFELA -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div class="lux-card rounded-2xl p-6 lg:col-span-2 space-y-4">
+                    <div class="flex justify-between items-center border-b border-luxBorder pb-2">
+                        <h3 class="font-bold text-lg text-textDark">🏆 Ranking Towarzystw Ubezpieczeniowych (TU)</h3>
+                        <span class="text-xs text-textMuted">Sortowane wg przypisu netto</span>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse text-sm">
+                            <thead>
+                                <tr class="border-b border-luxBorder text-[10px] text-textMuted uppercase bg-luxBg/50">
+                                    <th class="p-3">Towarzystwo (TU)</th>
+                                    <th class="p-3 text-center">Polisy (Udział)</th>
+                                    <th class="p-3 text-right">Przypis Netto</th>
+                                    <th class="p-3 text-right">Prowizja</th>
+                                    <th class="p-3 text-right">Śr. Prowizja</th>
+                                </tr>
+                            </thead>
+                            <tbody id="st_tuTableBody" class="divide-y divide-luxBorder"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="space-y-6">
+                    <!-- STRUKTURA PORTFELA -->
+                    <div class="lux-card rounded-2xl p-6 space-y-3">
+                        <h3 class="font-bold text-lg border-b border-luxBorder pb-2">📊 Struktura Portfela</h3>
+                        <div id="st_typeBreakdown" class="space-y-3 text-xs"></div>
+                    </div>
+
+                    <!-- SKUTECZNOŚĆ ŹRÓDEŁ POLECEŃ -->
+                    <div class="lux-card rounded-2xl p-6 space-y-3">
+                        <h3 class="font-bold text-lg border-b border-luxBorder pb-2">📣 Źródła Poleceń (LTV)</h3>
+                        <div id="st_sourcesBreakdown" class="space-y-2 text-xs max-h-52 overflow-y-auto pr-1"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SEKCJA 2: RETENCJA KLIENTÓW ROK DO ROKU (YOY) I LISTA UTRACONYCH -->
+            <div class="lux-card rounded-2xl p-6 border-t-4 border-indigo-500 space-y-4">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-luxBorder pb-3 gap-2">
+                    <div>
+                        <h3 class="font-bold text-lg text-textDark">🔄 Retencja i Przepływ Klientów Rok do Roku (YoY)</h3>
+                        <p class="text-xs text-textMuted">Porównanie klientów aktywnych w wybranym roku względem roku poprzedniego (na podstawie daty startu polisy).</p>
+                    </div>
+                    <span id="st_retentionRateBadge" class="px-3 py-1 bg-indigo-50 text-indigo-800 border border-indigo-200 rounded-xl text-xs font-extrabold">Retencja: -%</span>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div class="bg-green-50 p-4 rounded-xl border border-green-200">
+                        <span class="text-[10px] font-bold text-green-800 uppercase block">🌟 Nowi Klienci w tym roku</span>
+                        <p id="st_retNew" class="text-2xl font-extrabold text-green-700 mt-1">0</p>
+                        <span class="text-[11px] text-green-800">Pierwsza polisa w historii przypada na ten rok</span>
+                    </div>
+                    <div class="bg-blue-50 p-4 rounded-xl border border-blue-200">
+                        <span class="text-[10px] font-bold text-blue-800 uppercase block">🤝 Klienci Utrzymani (Lojalni)</span>
+                        <p id="st_retKept" class="text-2xl font-extrabold text-blue-700 mt-1">0</p>
+                        <span class="text-[11px] text-blue-800">Mieli polisę rok wcześniej i zawarli kolejną</span>
+                    </div>
+                    <div class="bg-red-50 p-4 rounded-xl border border-red-200">
+                        <span class="text-[10px] font-bold text-red-800 uppercase block">⚠️ Utraceni / Uśpieni (Brak polisy w tym roku)</span>
+                        <p id="st_retLost" class="text-2xl font-extrabold text-red-600 mt-1">0</p>
+                        <span class="text-[11px] text-red-800">Mieli polisę w roku poprzednim, brak nowej w badanym</span>
+                    </div>
+                </div>
+
+                <div>
+                    <h4 class="text-xs font-bold uppercase text-red-800 mb-2">📋 Lista klientów uśpionych / utraconych z poprzedniego roku (Kliknij, aby otworzyć kartę i odzyskać kontakt):</h4>
+                    <div id="st_lostClientsList" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 max-h-60 overflow-y-auto p-1"></div>
+                </div>
+            </div>
+
+            <!-- SEKCJA 3: RADAR CROSS-SELLINGU ORAZ TOP 10 VIP -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <!-- RADAR CROSS-SELLINGU -->
+                <div class="lux-card rounded-2xl p-6 border-t-4 border-amber-500 space-y-3">
+                    <h3 class="font-bold text-lg text-textDark">🎯 Radar Cross-sellingu (Potencjał Dosprzedaży)</h3>
+                    <p class="text-xs text-textMuted">Klienci posiadający u Ciebie tylko jedną grupę produktową (gotowa baza pod telefon z ofertą Mieszkania lub Auta):</p>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                        <div class="bg-blue-50/60 border border-blue-200 rounded-xl p-3">
+                            <h4 class="font-bold text-xs text-blue-900 uppercase mb-2">🚗 Mają Auto -> Brak Majątku (<span id="st_crossNoHomeCount">0</span>)</h4>
+                            <div id="st_crossNoHomeList" class="space-y-1.5 max-h-56 overflow-y-auto pr-1 text-xs"></div>
+                        </div>
+                        <div class="bg-green-50/60 border border-green-200 rounded-xl p-3">
+                            <h4 class="font-bold text-xs text-green-900 uppercase mb-2">🏠 Mają Majątek -> Brak Auta (<span id="st_crossNoCarCount">0</span>)</h4>
+                            <div id="st_crossNoCarList" class="space-y-1.5 max-h-56 overflow-y-auto pr-1 text-xs"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- RANKING VIP TOP 10 KLIENTÓW -->
+                <div class="lux-card rounded-2xl p-6 border-t-4 border-goldAccent space-y-3">
+                    <h3 class="font-bold text-lg text-textDark">👑 Ranking VIP (Top 10 Klientów wg Prowizji LTV)</h3>
+                    <p class="text-xs text-textMuted">Najbardziej dochodowi klienci w całej historii Twojej bazy:</p>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse text-xs">
+                            <thead>
+                                <tr class="border-b border-luxBorder text-[10px] text-textMuted uppercase bg-luxBg/50">
+                                    <th class="p-2.5">Poz. / Klient</th>
+                                    <th class="p-2.5 text-center">Polisy</th>
+                                    <th class="p-2.5 text-right">Przypis Netto</th>
+                                    <th class="p-2.5 text-right">Zarobiona Prowizja</th>
+                                </tr>
+                            </thead>
+                            <tbody id="st_vipTableBody" class="divide-y divide-luxBorder"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SEKCJA 4: MAPA SEZONOWOŚCI (MIESIĄCE) ORAZ BILANS ODPISÓW / STORNA -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div class="lux-card rounded-2xl p-6 lg:col-span-2 space-y-3">
+                    <h3 class="font-bold text-lg border-b border-luxBorder pb-2">📅 Mapa Sezonowości Miesięcy (Styczeń – Grudzień)</h3>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse text-xs">
+                            <thead>
+                                <tr class="border-b border-luxBorder text-[10px] text-textMuted uppercase bg-luxBg/50">
+                                    <th class="p-2.5">Miesiąc</th>
+                                    <th class="p-2.5 text-center">Liczba Polis</th>
+                                    <th class="p-2.5 text-right">Przypis Netto</th>
+                                    <th class="p-2.5 text-right">Wygenerowana Prowizja</th>
+                                </tr>
+                            </thead>
+                            <tbody id="st_seasonalityBody" class="divide-y divide-luxBorder"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="lux-card rounded-2xl p-6 border-t-4 border-red-500 space-y-3">
+                    <h3 class="font-bold text-lg border-b border-luxBorder pb-2 text-red-800">📉 Bilans Odpisów i Storna</h3>
+                    <p class="text-xs text-textMuted">Analiza utraconej składki wg powodów rozwiązania umowy:</p>
+                    <div id="st_odpisBreakdown" class="space-y-2.5 text-xs pt-1"></div>
+                </div>
+            </div>
+        </section>
+
         <!-- KALENDARZ -->
         <section id="tab-calendar" class="space-y-6 hidden">
             <div class="flex flex-col sm:flex-row justify-between items-center gap-4">
@@ -446,7 +623,7 @@
                                 <div><label class="text-[10px] uppercase font-bold text-textMuted">Prawo jazdy od</label><input type="date" id="ce_license" min="1900-01-01" max="2100-12-31" class="w-full border rounded p-1.5 bg-white"></div>
                             </div>
                             <div><label class="text-[10px] uppercase font-bold text-textMuted">Adres</label><textarea id="ce_address" rows="2" class="w-full border rounded p-1.5 bg-white"></textarea></div>
-                            <div><label class="text-[10px] uppercase font-bold text-textMuted">Źródło</label><input type="text" id="ce_source" class="w-full border rounded p-1.5 bg-white"></div>
+                            <div><label class="text-[10px] uppercase font-bold text-textMuted">Źródło (np. Polecenie, Facebook, GSM)</label><input type="text" id="ce_source" class="w-full border rounded p-1.5 bg-white"></div>
                             <button type="button" onclick="saveCfmEdits()" class="w-full bg-goldAccent text-white text-sm py-2 rounded-lg font-bold mt-2 hover:bg-goldHover">💾 Zapisz zmiany</button>
                         </div>
                     </div>
@@ -572,7 +749,7 @@
         </div>
     </div>
 
-    <!-- SZUFLADA POLISY (KOMPLETNA - ZE WSZYSTKIMI ELEMENTAMI) -->
+    <!-- SZUFLADA POLISY -->
     <div id="policyDrawerOverlay" class="fixed inset-0 bg-black/20 backdrop-blur-sm z-50 hidden transition-opacity" onclick="closeDrawer('policy')"></div>
     <div id="policyDrawer" class="fixed top-0 right-0 h-full w-full max-w-md bg-luxCard shadow-2xl z-50 drawer-closed transition-transform duration-300 flex flex-col border-l border-luxBorder">
         <div class="p-6 border-b border-luxBorder bg-luxBg/50 relative">
@@ -673,7 +850,7 @@
                     <label id="pd_taskOcContainer" class="text-sm font-bold flex items-center mt-1 hidden"><input type="checkbox" id="pd_taskOc" onchange="togglePolicyTask('oc')" class="mr-2 w-4 h-4"> ✉️ Wypowiedzenie OC wysłane</label>
                 </div>
 
-                <!-- HARMONOGRAM RAT Z ROZLICZANIEM PROWIZJI PER RATA I PRZYCISKIEM SMS -->
+                <!-- HARMONOGRAM RAT -->
                 <div id="pd_installmentsBox" class="mt-4 p-4 bg-amber-50 rounded-xl border border-amber-200 hidden">
                     <div class="flex justify-between items-center border-b border-amber-200 pb-1 mb-2">
                         <p class="text-xs font-bold text-amber-900 uppercase">Harmonogram Rat i Prowizji TU</p>
@@ -865,7 +1042,6 @@
                     <div id="p_tempRisksList" class="space-y-2 mt-2 max-h-28 overflow-y-auto"></div>
                 </div>
 
-                <!-- POLA FINANSOWE: PRZYPIS, ODPIS I PROWIZJA -->
                 <div class="p-3.5 bg-green-50/70 rounded-xl border border-green-300 space-y-3">
                     <div class="grid grid-cols-2 gap-3">
                         <div>
@@ -1008,9 +1184,9 @@
         </div>
     </div>
 
-    <script src="firebase-config.js?v=2.0"></script>
-    <script src="ui.js?v=2.0"></script>
-    <script src="app.js?v=2.0"></script>
+    <script src="firebase-config.js?v=3.0"></script>
+    <script src="ui.js?v=3.0"></script>
+    <script src="app.js?v=3.0"></script>
 
 </body>
 </html>

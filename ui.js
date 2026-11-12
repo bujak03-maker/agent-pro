@@ -1,4 +1,4 @@
-// ui.js - Logika interfejsu, skrótów klawiszowych (Enter / Escape) i obsługi okien
+// ui.js - Logika interfejsu, skrótów klawiszowych (Enter / Escape) i obsługi okien (Wersja 3.0)
 
 document.addEventListener('keydown', function(event) {
     // ESCAPE - zamyka aktywne modale, szuflady i podpowiedzi wyszukiwarki
@@ -42,7 +42,7 @@ document.addEventListener('keydown', function(event) {
             return;
         }
 
-        // Szuflada polisy - Zapis ręcznej prowizji i odpisu
+        // Szuflada polisy - Zapis ręcznej prowizji i odpisu po wciśnięciu Enter
         if (['pd_commInput', 'pd_commNoteInput', 'pd_odpisInput'].includes(activeEl.id)) {
             event.preventDefault();
             if (activeEl.id === 'pd_odpisInput' && typeof saveOdpisFromDrawer === 'function') {
@@ -79,9 +79,9 @@ document.addEventListener('keydown', function(event) {
     }
 });
 
-// Przełączanie głównych zakładek
+// Przełączanie głównych zakładek (uwzględnia nową zakładkę 'stats')
 function switchTab(t) {
-    const tabs = ['dashboard', 'clients', 'policies', 'offers', 'renewals', 'finances', 'calendar', 'settings'];
+    const tabs = ['dashboard', 'clients', 'policies', 'offers', 'renewals', 'finances', 'stats', 'calendar', 'settings'];
     
     tabs.forEach(x => {
         let tab = document.getElementById('tab-' + x);
@@ -96,46 +96,64 @@ function switchTab(t) {
     if (activeTab) activeTab.classList.remove('hidden');
     if (activeBtn) activeBtn.className = "px-3 py-2 rounded-lg text-sm font-medium bg-goldAccent text-white shadow-sm transition-all";
     
-    if (typeof syncAndRender === 'function') syncAndRender(false);
+    if (t === 'stats' && typeof renderStatistics === 'function') {
+        renderStatistics();
+    } else if (typeof syncAndRender === 'function') {
+        syncAndRender(false);
+    }
 }
 
 // Obsługa modali
 function openClientModal() { 
-    document.getElementById('addName').value = "";
-    document.getElementById('addPesel').value = "";
-    document.getElementById('clientModal').style.display = 'flex'; 
-    setTimeout(() => document.getElementById('addName').focus(), 50); 
+    let n = document.getElementById('addName');
+    let p = document.getElementById('addPesel');
+    let m = document.getElementById('clientModal');
+    if(n) n.value = "";
+    if(p) p.value = "";
+    if(m) m.style.display = 'flex'; 
+    setTimeout(() => { if(n) n.focus(); }, 50); 
 }
 function closeClientModal() { 
-    document.getElementById('clientModal').style.display = 'none'; 
+    let m = document.getElementById('clientModal');
+    if(m) m.style.display = 'none'; 
 }
 
 function openClientFull(id) {
     if (typeof currentOpenId !== 'undefined') currentOpenId = id;
-    document.getElementById('clientFullModalOverlay').classList.remove('hidden');
+    let ov = document.getElementById('clientFullModalOverlay');
+    if(ov) ov.classList.remove('hidden');
     if (typeof populateClientFull === 'function') populateClientFull(id); 
 }
 function closeClientFull() { 
-    document.getElementById('clientFullModalOverlay').classList.add('hidden'); 
+    let ov = document.getElementById('clientFullModalOverlay');
+    if(ov) ov.classList.add('hidden'); 
 }
 
 function openOfferModal(offerId = null, prefillClientId = null) {
     if (typeof editingOfferId !== 'undefined') editingOfferId = offerId;
-    document.getElementById('offerModal').classList.remove('hidden');
+    let om = document.getElementById('offerModal');
+    if(om) om.classList.remove('hidden');
     if (typeof populateOfferModal === 'function') populateOfferModal(offerId, prefillClientId);
 }
 function closeOfferModal() { 
-    document.getElementById('offerModal').classList.add('hidden'); 
+    let om = document.getElementById('offerModal');
+    if(om) om.classList.add('hidden'); 
 }
 
 function openPolicyModal(editId = null, prefillClientId = null) {
-    document.getElementById('policyModal').classList.remove('hidden');
-    document.getElementById('policyModal').classList.add('flex');
+    let pm = document.getElementById('policyModal');
+    if(pm) {
+        pm.classList.remove('hidden');
+        pm.classList.add('flex');
+    }
     if (typeof populatePolicyModal === 'function') populatePolicyModal(editId, prefillClientId); 
 }
 function closePolicyModal() { 
-    document.getElementById('policyModal').classList.add('hidden'); 
-    document.getElementById('policyModal').classList.remove('flex'); 
+    let pm = document.getElementById('policyModal');
+    if(pm) {
+        pm.classList.add('hidden'); 
+        pm.classList.remove('flex'); 
+    }
 }
 
 function openDrawer(type, id) {
@@ -164,6 +182,8 @@ function toggleCfmEdit() {
     let em = document.getElementById('cfm_editMode');
     let vm = document.getElementById('cfm_viewMode');
     let btn = document.getElementById('cfm_btnEdit');
+    if(!em || !vm || !btn) return;
+
     if(em.classList.contains('hidden')) {
         if (typeof clientsList !== 'undefined' && typeof currentOpenId !== 'undefined') {
             let c = clientsList.find(x => String(x.id) === String(currentOpenId));
@@ -193,6 +213,7 @@ function toggleCfmEdit() {
 // Otwieranie / zamykanie formularza nowego pojazdu w garażu
 function toggleAddVehicle() { 
     let box = document.getElementById('cfm_addVehicleBox');
+    if(!box) return;
     if (typeof editingVehicleId !== 'undefined') editingVehicleId = null;
     
     box.classList.toggle('hidden');
@@ -203,7 +224,8 @@ function toggleAddVehicle() {
             if(document.getElementById(id)) document.getElementById(id).value = "";
         });
         if(document.getElementById('v_anglik')) document.getElementById('v_anglik').checked = false;
-        document.getElementById('v_brand').focus();
+        let bEl = document.getElementById('v_brand');
+        if(bEl) bEl.focus();
     }
 }
 
@@ -233,6 +255,7 @@ function calcKwFromKm(kmVal) {
 // Otwieranie / zamykanie rozbudowanego formularza lokalu / nieruchomości
 function toggleAddProperty() { 
     let box = document.getElementById('cfm_addPropertyBox');
+    if(!box) return;
     if (typeof editingPropertyId !== 'undefined') editingPropertyId = null;
 
     box.classList.toggle('hidden'); 
@@ -247,7 +270,8 @@ function toggleAddProperty() {
         ['prop_secDoors', 'prop_secAlarm', 'prop_flammable', 'prop_flood'].forEach(id => {
             if(document.getElementById(id)) document.getElementById(id).checked = false;
         });
-        document.getElementById('prop_address').focus();
+        let aEl = document.getElementById('prop_address');
+        if(aEl) aEl.focus();
     }
 }
 
@@ -271,11 +295,13 @@ function handlePolicyTypeChange() {
 
 // Dynamiczne przeliczanie składki netto (Składka pierwotna - Odpis) w modalu polisy
 function recalcNetPremiumModal() {
-    let prem = parseFloat(document.getElementById('p_premium').value) || 0;
-    let odpis = parseFloat(document.getElementById('p_odpis').value) || 0;
-    let net = Math.max(0, prem - odpis);
+    let premEl = document.getElementById('p_premium');
+    let odpisEl = document.getElementById('p_odpis');
     let disp = document.getElementById('p_premiumNetDisplay');
-    if (disp) {
-        disp.innerText = (typeof formatPLN === 'function') ? formatPLN(net) : net.toFixed(2) + " PLN";
-    }
+    if (!disp) return;
+
+    let prem = premEl ? (parseFloat(String(premEl.value).replace(',', '.')) || 0) : 0;
+    let odpis = odpisEl ? (parseFloat(String(odpisEl.value).replace(',', '.')) || 0) : 0;
+    let net = Math.max(0, prem - odpis);
+    disp.innerText = (typeof formatPLN === 'function') ? formatPLN(net) : net.toFixed(2) + " PLN";
 }

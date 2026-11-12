@@ -1,4 +1,4 @@
-// app.js - Główna logika biznesowa Agent 1.0 Pro (Wersja 2.0 - Stabilna)
+// app.js - Główna logika biznesowa Agent 1.0 Pro (Wersja 3.0 - CZĘŚĆ 1 z 2)
 
 // ================= 1. ZMIENNE GLOBALNE =================
 let clientsList = [];
@@ -85,6 +85,7 @@ function syncAndRender(uploadToCloud = true) {
     try { renderPolicies(); } catch(e) { console.error("Błąd renderPolicies:", e); }
     try { renderFinances(); } catch(e) { console.error("Błąd renderFinances:", e); }
     try { renderDashboard(); } catch(e) { console.error("Błąd renderDashboard:", e); }
+    try { if (typeof renderStatistics === 'function') renderStatistics(); } catch(e) { console.error("Błąd renderStatistics:", e); }
     try { renderCommissionDict(); } catch(e) { console.error("Błąd renderCommissionDict:", e); }
     try { renderOffersList(); } catch(e) { console.error("Błąd renderOffersList:", e); }
     try { renderInsurersLibrary(); } catch(e) { console.error("Błąd renderInsurersLibrary:", e); }
@@ -107,7 +108,6 @@ function syncAndRender(uploadToCloud = true) {
             monthlyGoal: Number(monthlyGoalAmount) || 10000,
             customBrands: customBrandsList || []
         };
-        // Usunięcie wszystkich potencjalnych wartości undefined, które blokują zapis w Firebase Firestore
         const cleanDataObj = JSON.parse(JSON.stringify(rawObj));
         db.collection('agentData').doc(currentUserUid).set(cleanDataObj).catch(e => {
             console.error("Błąd zapisu do Firebase:", e);
@@ -186,7 +186,21 @@ function getFirstInstallmentAmount(p) {
     return totalPrem / instCount;
 }
 
-// Podsumowanie prowizji z rat (ile wypłacono wg wpisów TU, ile zostało)
+// Obliczenie nierozliczonej gotówki dla danej polisy (niezależnie czy checkbox I raty był kliknięty ręcznie)
+function getUnsettledCashAmount(p) {
+    if (!p || p.paymentMethod !== 'Gotówka' || p.cashPaidToTu || p.settlementStatus === 'anulowana') return 0;
+    let cashSum = getFirstInstallmentAmount(p);
+    let instCount = parseInt(p.installments) || 1;
+    if (instCount > 1 && p.installmentDates) {
+        for (let i = 2; i <= instCount; i++) {
+            if (p.installmentDates[i] && p.installmentDates[i].paid) {
+                cashSum += parseFloat(p.installmentDates[i].amount) || 0;
+            }
+        }
+    }
+    return cashSum;
+}
+
 function getPolicyCommissionBreakdown(p) {
     if (!p) return { total: 0, paid: 0, remaining: 0, statusColor: "red" };
     let totalComm = parseFloat(p.commissionAmt) || 0;
@@ -220,7 +234,6 @@ function getPolicyCommissionBreakdown(p) {
     return { total: totalComm, paid: paidFromTu, remaining: remaining, statusColor: statusColor };
 }
 
-// Obliczenie wartości klienta (LTV: przypis netto + zarobiona prowizja)
 function calculateClientLtv(clientId) {
     let cPolicies = policiesList.filter(p => String(p.clientId) === String(clientId));
     let totalNetPrem = 0;
@@ -245,7 +258,6 @@ function calculateClientLtv(clientId) {
     return { netPremium: totalNetPrem, earnedComm: totalEarnedComm };
 }
 
-// Generator SMS / WhatsApp z gotowym przypomnieniem
 function sendPaymentReminderSms(policyId, rataIdx) {
     let p = policiesList.find(x => String(x.id) === String(policyId));
     if(!p) return;
@@ -543,8 +555,9 @@ function printTodayPlan() {
         let cPhone = (c && c.phone) ? ` | tel. ${c.phone}` : "";
 
         if(!p.scansSent) tasksHtml += `<div class="py-1 border-b border-gray-100">☐ <b>[SKANY DO TU]</b> ${p.insurer} (${p.subject || ''}) – Klient: ${cName}${cPhone}</div>`;
-        if(p.paymentMethod === 'Gotówka' && p.firstPaymentPaid && !p.cashPaidToTu) {
-            tasksHtml += `<div class="py-1 border-b border-gray-100 text-emerald-800">☐ <b>[WPŁATA GOTÓWKI DO TU]</b> ${p.insurer} (${formatPLN(getFirstInstallmentAmount(p))}) – Klient: ${cName}</div>`;
+        let unsettledCash = getUnsettledCashAmount(p);
+        if(unsettledCash > 0) {
+            tasksHtml += `<div class="py-1 border-b border-gray-100 text-emerald-800">☐ <b>[WPŁATA GOTÓWKI DO TU]</b> ${p.insurer} (${formatPLN(unsettledCash)}) – Klient: ${cName}</div>`;
         }
         if(p.reqAc && !p.acDone) tasksHtml += `<div class="py-1 border-b border-gray-100">☐ <b>[ZDJĘCIA AC / INSPEKCJA]</b> ${cName}${cPhone} – ${p.insurer} (${p.subject || ''})</div>`;
         if(p.reqOc && !p.ocDone) tasksHtml += `<div class="py-1 border-b border-gray-100">☐ <b>[WYPOWIEDZENIE]</b> ${cName}${cPhone} – ${p.insurer} (${p.subject || ''})</div>`;
@@ -1210,7 +1223,6 @@ function populatePolicyModal(editId = null, prefillClientId = null) {
         let p = policiesList.find(x => String(x.id) === String(editId)); 
         if(p) {
             let c = clientsList.find(x => String(x.id) === String(p.clientId));
-            // Zabezpieczenie: nawet jeśli klient został usunięty lub ma nietypowe ID, zachowaj powiązanie i pozwól edytować polisę!
             selectedClientIdForPolicy = c ? c.id : (p.clientId || "unknown");
             if(peselInp) peselInp.value = c ? (c.pesel || c.nip || "") : "";
             document.getElementById('p_clientFoundName').innerText = c ? c.name : "Przypisany klient";
@@ -1710,6 +1722,9 @@ function savePolicy() {
         let commNote = document.getElementById('p_commNote') ? document.getElementById('p_commNote').value.trim() : "";
         let paymentMethod = document.getElementById('p_paymentMethod') ? document.getElementById('p_paymentMethod').value : "Przelew";
 
+        // Automat dla gotówki: Jeśli polisa jest gotówkowa, pierwsza wpłata z automatu jest pobrana od klienta!
+        let autoFirstPaid = (paymentMethod === 'Gotówka') ? true : (existingPolicy ? (existingPolicy.firstPaymentPaid || false) : false);
+
         let pData = { 
             id: editingPolicyId || Date.now(), 
             clientId: selectedClientIdForPolicy, 
@@ -1726,7 +1741,7 @@ function savePolicy() {
             installments: instCount, 
             firstPaymentDate: document.getElementById('p_firstPaymentDate').value || "", 
             installmentDates: instDates, 
-            firstPaymentPaid: existingPolicy ? (existingPolicy.firstPaymentPaid || false) : false, 
+            firstPaymentPaid: autoFirstPaid, 
             firstPaymentComm: (existingPolicy && existingPolicy.firstPaymentComm !== undefined) ? existingPolicy.firstPaymentComm : "",
             settlementStatus: existingPolicy ? (existingPolicy.settlementStatus || "nierozliczona") : "nierozliczona",
             scansSent: existingPolicy ? (existingPolicy.scansSent || false) : false,
@@ -1770,6 +1785,7 @@ function savePolicy() {
         alert("Wystąpił błąd podczas zapisu polisy: " + err.message);
     }
 }
+// app.js - Główna logika biznesowa Agent 1.0 Pro (Wersja 3.0 - CZĘŚĆ 2 z 2)
 
 function saveDrawerCommissionOverride() {
     if(!currentOpenPolicyId) return;
@@ -1823,7 +1839,6 @@ function updatePolicySettlement(statusVal) {
     }
 }
 
-// Zapis wypłaconej prowizji TU dla konkretnej raty
 function updateRataCommTu(policyId, rataIdx, commVal) {
     let p = policiesList.find(x => String(x.id) === String(policyId));
     if(!p) return;
@@ -1864,7 +1879,6 @@ function populateDrawer(type, id) {
         document.getElementById('pd_start').innerText = p.dateStart || "-"; 
         document.getElementById('pd_end').innerText = p.dateEnd || "-";
         
-        // Lista ryzyk w szufladzie
         let rList = document.getElementById('pd_risksList'); 
         if(rList) {
             rList.innerHTML = ""; 
@@ -1877,7 +1891,6 @@ function populateDrawer(type, id) {
             }
         }
 
-        // Kwoty przypisu i odpisów
         let netPrem = getPolicyNetPremium(p);
         let rawEl = document.getElementById('pd_premiumRaw');
         if(rawEl) rawEl.innerText = formatPLN(p.premium) + (p.installments > 1 ? ` (${p.installments} rat)` : "");
@@ -1891,7 +1904,6 @@ function populateDrawer(type, id) {
         let netEl = document.getElementById('pd_premiumNet');
         if(netEl) netEl.innerText = formatPLN(netPrem);
 
-        // Prowizja łączna i notatka
         let commInp = document.getElementById('pd_commInput');
         if(commInp) commInp.value = Number(p.commissionAmt || 0).toFixed(2);
         
@@ -1901,7 +1913,6 @@ function populateDrawer(type, id) {
         let commStatusEl = document.getElementById('pd_commManualStatus');
         if(commStatusEl) commStatusEl.innerText = p.isManualComm ? "(Wpisana ręcznie)" : "(Wyliczona z ryzyk)";
 
-        // Statusy operacyjne z TU
         let scansCheck = document.getElementById('pd_scansSent');
         let cashCheck = document.getElementById('pd_cashPaidToTu');
         if(scansCheck) scansCheck.checked = p.scansSent || false;
@@ -1913,7 +1924,6 @@ function populateDrawer(type, id) {
         let setSelect = document.getElementById('pd_settlementStatus');
         if(setSelect) setSelect.value = p.settlementStatus || "nierozliczona";
 
-        // Harmonogram rat i prowizji TU
         let instBox = document.getElementById('pd_installmentsBox'); 
         let instList = document.getElementById('pd_installmentsList'); 
         if(instBox && instList) {
@@ -2315,16 +2325,16 @@ function renderDashboard() {
         let isCanceled = (p.settlementStatus === 'anulowana');
         let netPrem = getPolicyNetPremium(p);
 
-        if (p.paymentMethod === 'Gotówka' && p.firstPaymentPaid && !p.cashPaidToTu) {
-            cashInHand += getFirstInstallmentAmount(p);
-        }
+        // Naprawione zliczanie gotówki w ręku: każda polisa gotówkowa bez odhaczonego "Wpłacone do TU" wlicza się od razu!
+        let unsettledCash = getUnsettledCashAmount(p);
+        cashInHand += unsettledCash;
 
         let needsTuAction = false;
         let tuReasons = [];
         if (!p.scansSent) { needsTuAction = true; tuReasons.push("📄 Skany do wysłania"); }
-        if (p.paymentMethod === 'Gotówka' && p.firstPaymentPaid && !p.cashPaidToTu) {
+        if (unsettledCash > 0) {
             needsTuAction = true;
-            tuReasons.push(`💵 Gotówka: ${formatPLN(getFirstInstallmentAmount(p))}`);
+            tuReasons.push(`💵 Gotówka: ${formatPLN(unsettledCash)}`);
         }
         if (needsTuAction && !isCanceled) {
             tuSettleCount++;
@@ -2336,7 +2346,7 @@ function renderDashboard() {
                     </div>
                     <div class="flex gap-1">
                         ${!p.scansSent ? `<button onclick="toggleTuAction('scans', '${p.id}')" class="text-[10px] bg-purple-50 text-purple-700 border border-purple-300 hover:bg-purple-100 px-2 py-1 rounded font-bold">Skany ✓</button>` : ''}
-                        ${(p.paymentMethod === 'Gotówka' && !p.cashPaidToTu) ? `<button onclick="toggleTuAction('cash', '${p.id}')" class="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-300 hover:bg-emerald-100 px-2 py-1 rounded font-bold">Wpłacone ✓</button>` : ''}
+                        ${(unsettledCash > 0) ? `<button onclick="toggleTuAction('cash', '${p.id}')" class="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-300 hover:bg-emerald-100 px-2 py-1 rounded font-bold">Wpłacone ✓</button>` : ''}
                     </div>
                 </div>`;
         }
@@ -2640,7 +2650,355 @@ function exportFinancesCSV() {
     URL.revokeObjectURL(url);
 }
 
-// ================= 12. KALENDARZ =================
+// ================= 12. KOMBAJN ANALITYCZNY (📈 STATYSTYKI) =================
+function renderStatistics() {
+    let yearSelect = document.getElementById('statsYearFilter');
+    if (!yearSelect) return;
+
+    // 1. Zbierz wszystkie unikalne roczniki polis + bieżący rok
+    let currentYear = new Date().getFullYear();
+    let yearsSet = new Set([currentYear, currentYear - 1]);
+    let clientFirstYearMap = {}; // Mapa: clientId -> najwcześniejszy rok polisy
+
+    policiesList.forEach(p => {
+        if (p.dateStart) {
+            let y = new Date(p.dateStart).getFullYear();
+            if (!isNaN(y) && y > 1990 && y < 2100) {
+                yearsSet.add(y);
+                let cid = String(p.clientId);
+                if (!clientFirstYearMap[cid] || y < clientFirstYearMap[cid]) {
+                    clientFirstYearMap[cid] = y;
+                }
+            }
+        }
+    });
+
+    let sortedYears = Array.from(yearsSet).sort((a, b) => b - a);
+    let currentSelectedVal = yearSelect.value || String(currentYear);
+    
+    yearSelect.innerHTML = `<option value="all">Cała historia (Wszystkie lata)</option>`;
+    sortedYears.forEach(y => {
+        yearSelect.innerHTML += `<option value="${y}">Rok ${y}</option>`;
+    });
+
+    if (currentSelectedVal === 'all' || sortedYears.includes(parseInt(currentSelectedVal))) {
+        yearSelect.value = currentSelectedVal;
+    } else {
+        yearSelect.value = String(currentYear);
+    }
+
+    let selectedYear = yearSelect.value === 'all' ? null : parseInt(yearSelect.value);
+
+    // 2. Filtrowanie polis dla wybranego okresu (bez całkowicie anulowanych bez wpłat)
+    let validPoliciesAllTime = policiesList.filter(p => p.settlementStatus !== 'anulowana' || p.firstPaymentPaid);
+    let filteredPolicies = validPoliciesAllTime.filter(p => {
+        if (!selectedYear) return true;
+        if (!p.dateStart) return false;
+        return new Date(p.dateStart).getFullYear() === selectedYear;
+    });
+
+    // 3. Obliczenia głównych KPI (Polisy w roku vs ogółem, Klienci w roku vs ogółem)
+    let totalPoliciesAll = validPoliciesAllTime.length;
+    let periodPoliciesCount = filteredPolicies.length;
+    let newBizCount = filteredPolicies.filter(p => p.salesType !== 'renewal').length;
+    let renBizCount = filteredPolicies.filter(p => p.salesType === 'renewal').length;
+
+    let activeClientsInPeriod = new Set(filteredPolicies.map(p => String(p.clientId)));
+    let totalClientsAll = clientsList.length;
+
+    let newClientsInPeriodCount = 0;
+    activeClientsInPeriod.forEach(cid => {
+        if (!selectedYear || clientFirstYearMap[cid] === selectedYear) {
+            newClientsInPeriodCount++;
+        }
+    });
+
+    let periodNetPrem = 0;
+    let periodComm = 0;
+    filteredPolicies.forEach(p => {
+        periodNetPrem += getPolicyNetPremium(p);
+        periodComm += parseFloat(p.commissionAmt) || 0;
+    });
+
+    let avgPrem = periodPoliciesCount > 0 ? (periodNetPrem / periodPoliciesCount) : 0;
+    let avgComm = periodPoliciesCount > 0 ? (periodComm / periodPoliciesCount) : 0;
+
+    document.getElementById('st_policiesYear').innerText = periodPoliciesCount;
+    document.getElementById('st_policiesTotal').innerText = totalPoliciesAll;
+    document.getElementById('st_policiesSub').innerText = `Nowy biznes: ${newBizCount} | Wznowienia: ${renBizCount}`;
+
+    document.getElementById('st_clientsYear').innerText = activeClientsInPeriod.size;
+    document.getElementById('st_clientsTotal').innerText = totalClientsAll;
+    document.getElementById('st_clientsSub').innerText = selectedYear 
+        ? `W tym nowi w ${selectedYear} r.: ${newClientsInPeriodCount} os.` 
+        : `Wszyscy klienci z polisami: ${activeClientsInPeriod.size} os.`;
+
+    document.getElementById('st_netPremium').innerText = formatPLN(periodNetPrem);
+    document.getElementById('st_avgPremium').innerText = `Średnia składka: ${formatPLN(avgPrem)}`;
+    document.getElementById('st_totalComm').innerText = formatPLN(periodComm);
+    document.getElementById('st_avgComm').innerText = `Średnia prowizja: ${formatPLN(avgComm)}`;
+
+    // 4. Ranking Towarzystw Ubezpieczeniowych (TU)
+    let tuStats = {};
+    filteredPolicies.forEach(p => {
+        let ins = p.insurer || "Inne";
+        if (!tuStats[ins]) tuStats[ins] = { count: 0, netPrem: 0, comm: 0 };
+        tuStats[ins].count++;
+        tuStats[ins].netPrem += getPolicyNetPremium(p);
+        tuStats[ins].comm += parseFloat(p.commissionAmt) || 0;
+    });
+
+    let tuBody = document.getElementById('st_tuTableBody');
+    tuBody.innerHTML = "";
+    let sortedTu = Object.keys(tuStats).sort((a, b) => tuStats[b].netPrem - tuStats[a].netPrem);
+
+    if (sortedTu.length === 0) {
+        tuBody.innerHTML = `<tr><td colspan="5" class="p-6 text-center text-textMuted">Brak sprzedanych polis w wybranym okresie.</td></tr>`;
+    } else {
+        sortedTu.forEach((ins, idx) => {
+            let d = tuStats[ins];
+            let sharePct = periodPoliciesCount > 0 ? Math.round((d.count / periodPoliciesCount) * 100) : 0;
+            let avgTuComm = d.count > 0 ? (d.comm / d.count) : 0;
+            let medal = idx === 0 ? "🥇 " : (idx === 1 ? "🥈 " : (idx === 2 ? "🥉 " : ""));
+
+            tuBody.innerHTML += `
+                <tr class="hover:bg-luxBg/60">
+                    <td class="p-3 font-bold text-textDark">${medal}${ins}</td>
+                    <td class="p-3">
+                        <div class="flex items-center justify-between text-xs mb-1">
+                            <span class="font-bold">${d.count} szt.</span>
+                            <span class="text-textMuted">${sharePct}%</span>
+                        </div>
+                        <div class="w-full bg-gray-200 rounded-full h-1.5"><div class="bg-goldAccent h-1.5 rounded-full" style="width: ${sharePct}%"></div></div>
+                    </td>
+                    <td class="p-3 text-right font-bold text-indigo-700">${formatPLN(d.netPrem)}</td>
+                    <td class="p-3 text-right font-extrabold text-green-600">${formatPLN(d.comm)}</td>
+                    <td class="p-3 text-right text-xs font-semibold text-textMuted">${formatPLN(avgTuComm)}</td>
+                </tr>`;
+        });
+    }
+
+    // 5. Struktura Portfela (Komunikacja vs Majątek vs Firmowe vs Travel)
+    let typeStats = {};
+    filteredPolicies.forEach(p => {
+        let t = p.type || "Inne";
+        if (!typeStats[t]) typeStats[t] = { count: 0, netPrem: 0, comm: 0 };
+        typeStats[t].count++;
+        typeStats[t].netPrem += getPolicyNetPremium(p);
+        typeStats[t].comm += parseFloat(p.commissionAmt) || 0;
+    });
+
+    let typeBox = document.getElementById('st_typeBreakdown');
+    typeBox.innerHTML = "";
+    Object.keys(typeStats).sort((a,b) => typeStats[b].netPrem - typeStats[a].netPrem).forEach(t => {
+        let d = typeStats[t];
+        let pct = periodPoliciesCount > 0 ? Math.round((d.count / periodPoliciesCount) * 100) : 0;
+        typeBox.innerHTML += `
+            <div class="bg-luxBg p-2.5 rounded-xl border border-luxBorder">
+                <div class="flex justify-between font-bold text-textDark mb-1">
+                    <span>${t} (${d.count} szt. - ${pct}%)</span>
+                    <span class="text-indigo-700">${formatPLN(d.netPrem)}</span>
+                </div>
+                <div class="flex justify-between text-[11px] text-textMuted">
+                    <span>Wygenerowana prowizja:</span>
+                    <span class="font-bold text-green-700">${formatPLN(d.comm)}</span>
+                </div>
+            </div>`;
+    });
+    if (Object.keys(typeStats).length === 0) typeBox.innerHTML = `<p class="text-textMuted italic">Brak danych.</p>`;
+
+    // 6. Skuteczność źródeł poleceń (w całej bazie klientów)
+    let sourceStats = {};
+    clientsList.forEach(c => {
+        let src = (c.source && c.source.trim() !== "") ? c.source.trim() : "Brak wpisanego źródła";
+        if (!sourceStats[src]) sourceStats[src] = { clients: 0, comm: 0, prem: 0 };
+        sourceStats[src].clients++;
+        let ltv = calculateClientLtv(c.id);
+        sourceStats[src].comm += ltv.earnedComm;
+        sourceStats[src].prem += ltv.netPremium;
+    });
+
+    let srcBox = document.getElementById('st_sourcesBreakdown');
+    srcBox.innerHTML = "";
+    Object.keys(sourceStats).sort((a,b) => sourceStats[b].comm - sourceStats[a].comm).forEach(src => {
+        let d = sourceStats[src];
+        srcBox.innerHTML += `
+            <div class="flex justify-between items-center bg-luxBg p-2 rounded-lg border border-luxBorder">
+                <div>
+                    <span class="font-bold text-textDark block">${src}</span>
+                    <span class="text-[10px] text-textMuted">Klientów: ${d.clients} | Przypis: ${formatPLN(d.prem)}</span>
+                </div>
+                <span class="font-extrabold text-green-700">${formatPLN(d.comm)}</span>
+            </div>`;
+    });
+
+    // 7. Retencja Rok do Roku (YoY) i lista utraconych klientów
+    let targetRetYear = selectedYear || currentYear;
+    let prevRetYear = targetRetYear - 1;
+
+    let clientsInPrevYear = new Set();
+    let clientsInTargetYear = new Set();
+
+    validPoliciesAllTime.forEach(p => {
+        if (!p.dateStart) return;
+        let y = new Date(p.dateStart).getFullYear();
+        if (y === prevRetYear) clientsInPrevYear.add(String(p.clientId));
+        if (y === targetRetYear) clientsInTargetYear.add(String(p.clientId));
+    });
+
+    let retNewCount = 0;
+    let retKeptCount = 0;
+    let lostClientIds = [];
+
+    clientsInTargetYear.forEach(cid => {
+        if (clientsInPrevYear.has(cid)) retKeptCount++;
+        else if (clientFirstYearMap[cid] === targetRetYear) retNewCount++;
+    });
+
+    clientsInPrevYear.forEach(cid => {
+        if (!clientsInTargetYear.has(cid)) {
+            lostClientIds.push(cid);
+        }
+    });
+
+    let retRate = clientsInPrevYear.size > 0 ? Math.round((retKeptCount / clientsInPrevYear.size) * 100) : 100;
+    document.getElementById('st_retentionRateBadge').innerText = `Porównanie ${prevRetYear} ➔ ${targetRetYear} | Retencja: ${retRate}%`;
+    document.getElementById('st_retNew').innerText = retNewCount;
+    document.getElementById('st_retKept').innerText = retKeptCount;
+    document.getElementById('st_retLost').innerText = lostClientIds.length;
+
+    let lostListEl = document.getElementById('st_lostClientsList');
+    lostListEl.innerHTML = "";
+    if (lostClientIds.length === 0) {
+        lostListEl.innerHTML = `<p class="text-xs text-green-700 font-bold col-span-3 py-2">🎉 Brawo! Wszyscy klienci z roku ${prevRetYear} zawarli polisy również w roku ${targetRetYear} (lub brak polis z ${prevRetYear} r.).</p>`;
+    } else {
+        lostClientIds.forEach(cid => {
+            let c = clientsList.find(x => String(x.id) === String(cid));
+            if (c) {
+                lostListEl.innerHTML += `
+                    <div onclick="openClientFull('${c.id}')" class="bg-white p-2.5 rounded-xl border border-red-200 hover:border-red-500 cursor-pointer flex justify-between items-center shadow-sm transition-all">
+                        <div>
+                            <span class="font-bold text-textDark text-xs block">${c.name}</span>
+                            <span class="text-[10px] text-textMuted">📞 ${c.phone || 'Brak telefonu'}</span>
+                        </div>
+                        <span class="text-[10px] bg-red-50 text-red-700 px-2 py-0.5 rounded font-bold">Otwórz ➔</span>
+                    </div>`;
+            }
+        });
+    }
+
+    // 8. Radar Cross-sellingu (Mają auto vs Mają majątek)
+    let noHomeHtml = "", noCarHtml = "";
+    let noHomeCount = 0, noCarCount = 0;
+
+    clientsList.forEach(c => {
+        let cPols = validPoliciesAllTime.filter(p => String(p.clientId) === String(c.id));
+        if (cPols.length === 0) return;
+
+        let hasCar = cPols.some(p => p.type === 'Komunikacja') || vehiclesList.some(v => String(v.clientId) === String(c.id));
+        let hasHome = cPols.some(p => p.type === 'Majątek') || propertiesList.some(pr => String(pr.clientId) === String(c.id));
+
+        if (hasCar && !hasHome) {
+            noHomeCount++;
+            noHomeHtml += `
+                <div onclick="openClientFull('${c.id}')" class="bg-white p-2 rounded border border-blue-200 hover:border-blue-500 cursor-pointer flex justify-between items-center">
+                    <span class="font-bold text-textDark truncate">${c.name}</span>
+                    <span class="text-[10px] text-blue-700 font-mono ml-1">${c.phone || 'Karta ➔'}</span>
+                </div>`;
+        } else if (hasHome && !hasCar) {
+            noCarCount++;
+            noCarHtml += `
+                <div onclick="openClientFull('${c.id}')" class="bg-white p-2 rounded border border-green-200 hover:border-green-500 cursor-pointer flex justify-between items-center">
+                    <span class="font-bold text-textDark truncate">${c.name}</span>
+                    <span class="text-[10px] text-green-700 font-mono ml-1">${c.phone || 'Karta ➔'}</span>
+                </div>`;
+        }
+    });
+
+    document.getElementById('st_crossNoHomeCount').innerText = noHomeCount;
+    document.getElementById('st_crossNoCarCount').innerText = noCarCount;
+    document.getElementById('st_crossNoHomeList').innerHTML = noHomeHtml || `<p class="text-textMuted italic">Brak klientów w tej grupie.</p>`;
+    document.getElementById('st_crossNoCarList').innerHTML = noCarHtml || `<p class="text-textMuted italic">Brak klientów w tej grupie.</p>`;
+
+    // 9. Ranking VIP (Top 10 Klientów wg prowizji LTV)
+    let vipList = clientsList.map(c => {
+        let ltv = calculateClientLtv(c.id);
+        let pCount = validPoliciesAllTime.filter(p => String(p.clientId) === String(c.id)).length;
+        return { id: c.id, name: c.name, count: pCount, prem: ltv.netPremium, comm: ltv.earnedComm };
+    }).sort((a, b) => b.comm - a.comm).slice(0, 10);
+
+    let vipBody = document.getElementById('st_vipTableBody');
+    vipBody.innerHTML = "";
+    vipList.forEach((v, idx) => {
+        if (v.count === 0 && v.comm === 0) return;
+        vipBody.innerHTML += `
+            <tr onclick="openClientFull('${v.id}')" class="hover:bg-amber-50/60 cursor-pointer">
+                <td class="p-2.5 font-bold text-textDark"><span class="text-goldAccent mr-1">#${idx + 1}</span> ${v.name}</td>
+                <td class="p-2.5 text-center font-semibold">${v.count} szt.</td>
+                <td class="p-2.5 text-right font-bold text-indigo-700">${formatPLN(v.prem)}</td>
+                <td class="p-2.5 text-right font-extrabold text-green-600">${formatPLN(v.comm)}</td>
+            </tr>`;
+    });
+    if (vipBody.innerHTML === "") vipBody.innerHTML = `<tr><td colspan="4" class="p-4 text-center text-textMuted">Brak danych.</td></tr>`;
+
+    // 10. Mapa Sezonowości Miesięcy (Styczeń - Grudzień)
+    const mNames = ["Styczeń", "Luty", "Marzec", "Kwiecień", "Maj", "Czerwiec", "Lipiec", "Sierpień", "Wrzesień", "Październik", "Listopad", "Grudzień"];
+    let monthsData = Array.from({ length: 12 }, () => ({ count: 0, prem: 0, comm: 0 }));
+
+    filteredPolicies.forEach(p => {
+        if (!p.dateStart) return;
+        let m = new Date(p.dateStart).getMonth();
+        if (!isNaN(m) && m >= 0 && m < 12) {
+            monthsData[m].count++;
+            monthsData[m].prem += getPolicyNetPremium(p);
+            monthsData[m].comm += parseFloat(p.commissionAmt) || 0;
+        }
+    });
+
+    let seasBody = document.getElementById('st_seasonalityBody');
+    seasBody.innerHTML = "";
+    monthsData.forEach((d, idx) => {
+        let highlight = d.count > 0 ? "font-bold text-textDark" : "text-gray-400";
+        seasBody.innerHTML += `
+            <tr class="hover:bg-luxBg/50 ${highlight}">
+                <td class="p-2.5">${idx + 1}. ${mNames[idx]}</td>
+                <td class="p-2.5 text-center">${d.count} szt.</td>
+                <td class="p-2.5 text-right text-indigo-700">${formatPLN(d.prem)}</td>
+                <td class="p-2.5 text-right text-green-600">${formatPLN(d.comm)}</td>
+            </tr>`;
+    });
+
+    // 11. Bilans Odpisów i Storna
+    let odpisStats = {};
+    let totalOdpisSum = 0;
+    policiesList.forEach(p => {
+        if (selectedYear && p.dateStart && new Date(p.dateStart).getFullYear() !== selectedYear) return;
+        let odp = parseFloat(p.odpis) || 0;
+        if (odp > 0) {
+            let reas = p.odpisReason || "Nieokreślony powód";
+            if (!odpisStats[reas]) odpisStats[reas] = { count: 0, sum: 0 };
+            odpisStats[reas].count++;
+            odpisStats[reas].sum += odp;
+            totalOdpisSum += odp;
+        }
+    });
+
+    let odpisBox = document.getElementById('st_odpisBreakdown');
+    odpisBox.innerHTML = `<div class="p-3 bg-red-50 border border-red-200 rounded-xl flex justify-between items-center mb-2"><span class="font-bold text-red-900">Łączne odpisy w okresie:</span><span class="text-base font-extrabold text-red-600">-${formatPLN(totalOdpisSum)}</span></div>`;
+    Object.keys(odpisStats).forEach(reas => {
+        let d = odpisStats[reas];
+        odpisBox.innerHTML += `
+            <div class="flex justify-between items-center bg-luxBg p-2 rounded border border-luxBorder">
+                <span><b>${reas}</b> (${d.count} szt.)</span>
+                <span class="font-bold text-red-600">-${formatPLN(d.sum)}</span>
+            </div>`;
+    });
+    if (totalOdpisSum === 0) {
+        odpisBox.innerHTML += `<p class="text-green-700 font-semibold py-2">Brak zarejestrowanych odpisów i zwrotów w tym okresie.</p>`;
+    }
+}
+
+// ================= 13. KALENDARZ =================
 function renderCalendar() {
     const grid = document.getElementById('calendarGrid'); 
     const evList = document.getElementById('calendarEventsList'); 
@@ -2781,7 +3139,7 @@ function addCalendarEvent(type) {
     }
 }
 
-// ================= 13. SŁOWNIKI I ADMINISTRACJA =================
+// ================= 14. SŁOWNIKI I ADMINISTRACJA =================
 function renderInsurersLibrary() {
     let listBody = document.getElementById('insurersLibraryBody'); 
     if(listBody) listBody.innerHTML = "";
